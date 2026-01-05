@@ -66,6 +66,50 @@ cp plugin/main.js plugin/manifest.json docs/.obsidian/plugins/nexuspm/
 
 ## 機能
 
+### WBS（Work Breakdown Structure）ビュー 📋
+
+プロジェクトフォルダ内のタスクを階層的なWBS形式で表示・管理します。
+
+**使い方:**
+1. ファイルエクスプローラーでフォルダを右クリック → 「WBSとして開く」
+2. または、コマンドパレットから「Open WBS View」を実行
+
+**タスクファイルの設定例:**
+```yaml
+---
+parent: "[[親タスク]]"
+status: in-progress
+assignee: 田中
+due-date: 2024-12-31
+progress: 50
+priority: 2
+estimated-hours: 8
+---
+# タスクのタイトル
+
+タスクの詳細説明...
+```
+
+**対応プロパティ:**
+| プロパティ | 説明 | 値の例 |
+|-----------|------|--------|
+| `parent` | 親タスクへのリンク | `[[親タスク]]` |
+| `status` | ステータス | `not-started`, `in-progress`, `completed`, `blocked`, `cancelled` |
+| `assignee` | 担当者 | `田中` |
+| `start-date` | 開始日 | `2024-01-01` |
+| `due-date` | 期限 | `2024-12-31` |
+| `progress` | 進捗率（0-100） | `50` |
+| `priority` | 優先度（1-5、1が最高） | `1` |
+| `estimated-hours` | 見積もり時間 | `8` |
+| `actual-hours` | 実績時間 | `4` |
+
+**日本語ステータスにも対応:**
+- `完了`, `済み` → completed
+- `進行中`, `作業中` → in-progress
+- `未着手`, `予定` → not-started
+- `ブロック中`, `保留` → blocked
+- `キャンセル`, `中止` → cancelled
+
 ### グラフビューH1見出し表示
 
 グラフビューのノードラベルを、ファイル名ではなく**ファイル内の最初のH1見出し**で表示します。
