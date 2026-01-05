@@ -1,9 +1,11 @@
-import { App, Plugin, PluginSettingTab, Setting, Notice, TFile } from 'obsidian';
+import { App, Plugin, PluginSettingTab, Setting, Notice, TFile, TFolder, WorkspaceLeaf } from 'obsidian';
 import { GraphLabelManager } from './src/graphLabelManager';
+import { WBSView, WBS_VIEW_TYPE } from './src/wbs/wbsView';
 
 interface HadocommunPluginSettings {
 	greeting: string;
 	useH1ForGraphNodes: boolean;
+	wbsEnabled: boolean;
 }
 
 interface GraphRenderer {
@@ -38,7 +40,8 @@ interface RenderableNode {
 
 const DEFAULT_SETTINGS: HadocommunPluginSettings = {
 	greeting: 'ハドこみゅへようこそ！ 🌈',
-	useH1ForGraphNodes: false
+	useH1ForGraphNodes: false,
+	wbsEnabled: true
 }
 
 export default class HadocommunPlugin extends Plugin {
@@ -56,10 +59,24 @@ export default class HadocommunPlugin extends Plugin {
 
 		this.labelManager = new GraphLabelManager(this.app.metadataCache, this.app.vault);
 
+		// WBS View を登録
+		this.registerView(
+			WBS_VIEW_TYPE,
+			(leaf) => new WBSView(leaf)
+		);
+
 		const ribbonIconEl = this.addRibbonIcon('dice', 'Hadocommun', (evt: MouseEvent) => {
 			new Notice(this.settings.greeting);
 		});
 		ribbonIconEl.addClass('hadocommun-ribbon-class');
+
+		// WBS リボンアイコンを追加
+		if (this.settings.wbsEnabled) {
+			const wbsRibbonEl = this.addRibbonIcon('layout-list', 'Open WBS View', async () => {
+				await this.activateWBSView();
+			});
+			wbsRibbonEl.addClass('wbs-ribbon-class');
+		}
 
 		this.addCommand({
 			id: 'show-greeting',
@@ -69,7 +86,83 @@ export default class HadocommunPlugin extends Plugin {
 			}
 		});
 
+		// WBS コマンドを追加
+		this.addCommand({
+			id: 'open-wbs-view',
+			name: 'Open WBS View',
+			callback: async () => {
+				await this.activateWBSView();
+			}
+		});
+
+		this.addCommand({
+			id: 'open-folder-as-wbs',
+			name: 'Open current folder as WBS',
+			checkCallback: (checking: boolean) => {
+				const activeFile = this.app.workspace.getActiveFile();
+				if (activeFile) {
+					if (!checking) {
+						const folderPath = activeFile.parent?.path || '';
+						this.openFolderAsWBS(folderPath);
+					}
+					return true;
+				}
+				return false;
+			}
+		});
+
+		// WBSタグをコピーするコマンド
+		this.addCommand({
+			id: 'copy-wbs-tags',
+			name: 'Copy WBS tags to clipboard',
+			checkCallback: (checking: boolean) => {
+				const leaves = this.app.workspace.getLeavesOfType(WBS_VIEW_TYPE);
+				if (leaves.length > 0) {
+					if (!checking) {
+						const view = leaves[0].view as WBSView;
+						if (view && typeof view.generateWBSTags === 'function') {
+							const tags = view.generateWBSTags();
+							if (tags.length > 0) {
+								const yamlTags = tags.map(t => `  - ${t}`).join('\n');
+								navigator.clipboard.writeText(`tags:\n${yamlTags}`);
+								new Notice('WBSタグをクリップボードにコピーしました');
+							}
+						}
+					}
+					return true;
+				}
+				return false;
+			}
+		});
+
 		this.addSettingTab(new HadocommunSettingTab(this.app, this));
+
+		// ファイルエクスプローラーのコンテキストメニューを拡張
+		this.registerEvent(
+			this.app.workspace.on('file-menu', (menu, file) => {
+				// フォルダの場合
+				if (file instanceof TFolder) {
+					menu.addItem((item) => {
+						item.setTitle('WBSとして開く')
+							.setIcon('layout-list')
+							.onClick(async () => {
+								await this.openFolderAsWBS(file.path);
+							});
+					});
+				}
+				
+				// .baseファイルの場合
+				if (file instanceof TFile && file.extension === 'base') {
+					menu.addItem((item) => {
+						item.setTitle('WBSとして開く')
+							.setIcon('layout-list')
+							.onClick(async () => {
+								await this.openBaseFileAsWBS(file.path);
+							});
+					});
+				}
+			})
+		);
 
 		this.app.workspace.onLayoutReady(() => {
 			if (this.settings.useH1ForGraphNodes) {
@@ -89,8 +182,12 @@ export default class HadocommunPlugin extends Plugin {
 
 		this.registerEvent(
 			this.app.vault.on('modify', (file) => {
-				if (file instanceof TFile && (file.extension === 'md' || file.extension === 'canvas')) {
-					this.labelManager.invalidateFileCache(file.path);
+				if (file instanceof TFile) {
+					if (file.extension === 'md' || file.extension === 'canvas') {
+						this.labelManager.invalidateFileCache(file.path);
+					}
+					// WBS Viewに変更を通知
+					this.notifyWBSViews(file);
 				}
 			})
 		);
@@ -103,11 +200,28 @@ export default class HadocommunPlugin extends Plugin {
 				}
 			})
 		);
+
+		this.registerEvent(
+			this.app.vault.on('create', (file) => {
+				if (file instanceof TFile) {
+					this.notifyWBSViews(file);
+				}
+			})
+		);
+
+		this.registerEvent(
+			this.app.vault.on('delete', (file) => {
+				if (file instanceof TFile) {
+					this.refreshAllWBSViews();
+				}
+			})
+		);
 	}
 
 	onunload() {
 		this.stopLabelLoop();
 		this.resetGraphLabels();
+		this.app.workspace.detachLeavesOfType(WBS_VIEW_TYPE);
 	}
 
 	async loadSettings() {
@@ -257,6 +371,101 @@ export default class HadocommunPlugin extends Plugin {
 		this.labelInterval = window.setInterval(run, 500);
 		this.registerInterval(this.labelInterval);
 	}
+
+	/**
+	 * すべてのWBSビューに変更を通知
+	 */
+	private notifyWBSViews(file: TFile): void {
+		const leaves = this.app.workspace.getLeavesOfType(WBS_VIEW_TYPE);
+		for (const leaf of leaves) {
+			const view = leaf.view as WBSView;
+			if (view && typeof view.onFileChange === 'function') {
+				view.onFileChange(file);
+			}
+		}
+	}
+
+	/**
+	 * すべてのWBSビューを更新
+	 */
+	private refreshAllWBSViews(): void {
+		const leaves = this.app.workspace.getLeavesOfType(WBS_VIEW_TYPE);
+		for (const leaf of leaves) {
+			const view = leaf.view as WBSView;
+			if (view && typeof view.refresh === 'function') {
+				view.refresh();
+			}
+		}
+	}
+
+	/**
+	 * WBS Viewをアクティブにする（タブとして開く）
+	 */
+	async activateWBSView(): Promise<WorkspaceLeaf> {
+		const { workspace } = this.app;
+
+		// 既存のWBSビューを探す
+		let leaf = workspace.getLeavesOfType(WBS_VIEW_TYPE)[0];
+
+		if (!leaf) {
+			// 新しいタブとして開く（右ペインではなくメインエリア）
+			leaf = workspace.getLeaf('tab');
+			await leaf.setViewState({ type: WBS_VIEW_TYPE, active: true });
+		}
+
+		workspace.revealLeaf(leaf);
+		return leaf;
+	}
+
+	/**
+	 * フォルダをWBSとして開く
+	 */
+	async openFolderAsWBS(folderPath: string): Promise<void> {
+		console.log('[WBS] Opening folder as WBS:', folderPath);
+		
+		// 既存のWBSビューを探すか、新しいタブを作成
+		let leaf = this.app.workspace.getLeavesOfType(WBS_VIEW_TYPE)[0];
+		
+		if (!leaf) {
+			leaf = this.app.workspace.getLeaf('tab');
+			await leaf.setViewState({ 
+				type: WBS_VIEW_TYPE, 
+				active: true,
+				state: { folder: folderPath }
+			});
+		} else {
+			// 既存のビューにフォルダをロード
+			this.app.workspace.revealLeaf(leaf);
+			const view = leaf.view as WBSView;
+			if (view && typeof view.loadFolder === 'function') {
+				await view.loadFolder(folderPath);
+			}
+		}
+	}
+
+	/**
+	 * .baseファイルをWBSとして開く
+	 */
+	async openBaseFileAsWBS(baseFilePath: string): Promise<void> {
+		console.log('[WBS] Opening base file as WBS:', baseFilePath);
+		
+		let leaf = this.app.workspace.getLeavesOfType(WBS_VIEW_TYPE)[0];
+		
+		if (!leaf) {
+			leaf = this.app.workspace.getLeaf('tab');
+			await leaf.setViewState({ 
+				type: WBS_VIEW_TYPE, 
+				active: true,
+				state: { baseFile: baseFilePath }
+			});
+		} else {
+			this.app.workspace.revealLeaf(leaf);
+			const view = leaf.view as WBSView;
+			if (view && typeof view.loadBaseFile === 'function') {
+				await view.loadBaseFile(baseFilePath);
+			}
+		}
+	}
 }
 
 class HadocommunSettingTab extends PluginSettingTab {
@@ -304,5 +513,41 @@ class HadocommunSettingTab extends PluginSettingTab {
 						this.plugin.resetGraphLabels();
 					}
 				}));
+
+		new Setting(containerEl)
+			.setName('WBS View')
+			.setHeading();
+
+		new Setting(containerEl)
+			.setName('Enable WBS View')
+			.setDesc('フォルダ内のタスクをWBS（Work Breakdown Structure）形式で表示・管理します')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.wbsEnabled)
+				.onChange(async (value) => {
+					this.plugin.settings.wbsEnabled = value;
+					await this.plugin.saveSettings();
+				}));
+
+		// WBS使用方法のヘルプ
+		const wbsHelp = containerEl.createDiv({ cls: 'setting-item' });
+		wbsHelp.innerHTML = `
+<div class="setting-item-info">
+	<div class="setting-item-name">WBSの使い方</div>
+	<div class="setting-item-description">
+		<ol style="margin: 0.5em 0; padding-left: 1.5em;">
+			<li>フォルダを右クリック → 「WBSとして開く」</li>
+			<li>タスクファイルのフロントマターに以下を設定:
+				<ul style="margin-top: 0.5em;">
+					<li><code>parent</code>: 親タスクへのリンク（例: <code>[[親タスク]]</code>）</li>
+					<li><code>status</code>: ステータス（not-started, in-progress, completed, blocked）</li>
+					<li><code>assignee</code>: 担当者名</li>
+					<li><code>due-date</code>: 期限（YYYY-MM-DD形式）</li>
+					<li><code>progress</code>: 進捗率（0-100）</li>
+				</ul>
+			</li>
+		</ol>
+	</div>
+</div>
+		`;
 	}
 }
