@@ -210,6 +210,33 @@ export class WBSParser {
 	}
 
 	/**
+	 * 単一ファイルの変更をプロジェクトに反映し、関係・WBS番号・レベルを更新する
+	 */
+	async updateProjectWithFile(project: WBSProject, file: TFile, folderPath: string): Promise<void> {
+		// Re-parse the file and update project map
+		const item = await this.parseFile(file);
+
+		if (item) {
+			project.items.set(file.path, item);
+		} else {
+			// If parseFile returns null (no frontmatter), still ensure default exists
+			project.items.delete(file.path);
+		}
+
+		// Clear child relationships and rebuild
+		for (const itm of project.items.values()) {
+			itm.childIds = [];
+		}
+		project.rootItemIds = [];
+
+		// Re-resolve relationships and update numbering/levels
+		this.resolveRelationships(project, folderPath);
+		this.assignWBSNumbers(project);
+		this.calculateLevels(project);
+		project.lastUpdated = new Date();
+	}
+
+	/**
 	 * 親子関係を解決（バックリンクによる階層構築）
 	 * 
 	 * ルール:

@@ -651,6 +651,21 @@ due-date: 2024-01-31
 		}
 		
 		if (this.currentFolder && file.path.startsWith(this.currentFolder)) {
+			// If we have a loaded project, attempt incremental update to avoid full reload
+			if (this.currentProject) {
+				void (async () => {
+					try {
+						await this.parser.updateProjectWithFile(this.currentProject!, file, this.currentFolder);
+						// Re-render view with updated project
+						this.render();
+					} catch (error) {
+						console.error('[WBS] incremental update failed:', error);
+						// Fallback to scheduled full refresh
+						this.scheduleRefresh();
+					}
+				})();
+				return;
+			}
 			this.scheduleRefresh();
 		}
 	}
