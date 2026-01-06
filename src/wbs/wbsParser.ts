@@ -99,6 +99,42 @@ export class WBSParser {
 			item.progress = Math.max(0, Math.min(100, progress));
 		}
 
+		// completed チェックボックスが設定されている場合、false または空文字以外は完了とみなす
+		const completedField = frontmatter[mapping.completed as keyof FrontmatterData];
+		if (completedField !== undefined) {
+			let isCompleted = false;
+			if (typeof completedField === 'boolean') {
+				isCompleted = completedField === true;
+			} else if (typeof completedField === 'string') {
+				const v = completedField.trim().toLowerCase();
+				isCompleted = v !== '' && v !== 'false' && v !== '0';
+			} else if (typeof completedField === 'number') {
+				isCompleted = completedField !== 0;
+			} else if (Array.isArray(completedField)) {
+				// 配列の場合、中身に真値やチェック表現があれば完了とみなす
+				isCompleted = completedField.some(val => {
+					if (typeof val === 'boolean') return val === true;
+					if (typeof val === 'number') return val !== 0;
+					if (typeof val === 'string') {
+						const s = val.trim().toLowerCase();
+						return s !== '' && s !== 'false' && s !== '0' && s !== '- [ ]';
+					}
+					return !!val;
+				});
+			} else if (typeof completedField === 'object' && completedField !== null) {
+				// オブジェクト等は存在すれば完了とみなす
+				isCompleted = true;
+			}
+
+			// Debug log to help diagnose cases where completed isn't applied
+			console.log('[WBS] parseFile completedField:', file.path, completedField, '-> isCompleted:', isCompleted);
+
+			if (isCompleted) {
+				item.progress = 100;
+				item.status = 'completed';
+			}
+		}
+
 		// 見積もり時間
 		const estimatedHours = frontmatter[mapping.estimatedHours];
 		if (typeof estimatedHours === 'number') {

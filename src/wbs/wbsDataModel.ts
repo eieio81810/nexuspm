@@ -126,6 +126,8 @@ export interface WBSPropertyMapping {
 	actualHours: string;
 	priority: string;
 	wbsNumber: string;
+	/** チェックボックス型の完了フラグ (例: completed) */
+	completed: string;
 }
 
 /**
@@ -145,7 +147,8 @@ export const DEFAULT_PROPERTY_MAPPING: WBSPropertyMapping = {
 	estimatedHours: 'estimated-hours',
 	actualHours: 'actual-hours',
 	priority: 'priority',
-	wbsNumber: 'wbs-number'
+	wbsNumber: 'wbs-number',
+	completed: 'completed'
 };
 
 /**
