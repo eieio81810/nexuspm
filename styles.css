@@ -131,12 +131,72 @@
 	margin-bottom: 16px;
 	color: #e74c3c;
 	display: flex;
-	align-items: center;
+	flex-direction: column;
 	gap: 8px;
 }
 
 .wbs-validation-icon {
 	font-size: 1.2em;
+}
+
+.wbs-validation-error-files {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	align-items: center;
+	font-size: 0.9em;
+	margin-top: 4px;
+}
+
+/* Error File Links */
+.wbs-error-file-link {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 4px 8px;
+	background: rgba(231, 76, 60, 0.15);
+	border: 1px solid rgba(231, 76, 60, 0.3);
+	border-radius: 4px;
+	color: #c0392b;
+	text-decoration: none;
+	cursor: pointer;
+	font-size: 0.9em;
+	transition: background 0.2s, border-color 0.2s;
+}
+
+.wbs-error-file-link:hover {
+	background: rgba(231, 76, 60, 0.25);
+	border-color: rgba(231, 76, 60, 0.5);
+	color: #a93226;
+	text-decoration: none;
+}
+
+/* Gantt Error Files */
+.wbs-gantt-error-files {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	align-items: center;
+	margin-top: 16px;
+	font-size: 0.9em;
+	color: var(--text-muted);
+}
+
+.wbs-gantt-error-files .wbs-error-file-link {
+	background: rgba(128, 128, 128, 0.1);
+	border-color: var(--background-modifier-border);
+	color: var(--text-normal);
+}
+
+.wbs-gantt-error-files .wbs-error-file-link:hover {
+	background: rgba(128, 128, 128, 0.2);
+	color: var(--text-accent);
+}
+
+/* Content container */
+.wbs-content {
+	width: 100%;
+	overflow: hidden;
 }
 
 /* ===========================================

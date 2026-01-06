@@ -288,7 +288,18 @@ due-date: 2024-01-31
 		const validation = this.parser.validateSingleRoot(this.currentProject);
 		if (!validation.valid) {
 			const errorDiv = container.createDiv({ cls: 'wbs-validation-error' });
-			errorDiv.innerHTML = `<span class="wbs-validation-icon">⚠️</span> ${validation.error}`;
+			let errorHtml = `<span class="wbs-validation-icon">⚠️</span> ${validation.error}`;
+			
+			// エラー対象ファイルへのリンクを追加
+			if (validation.errorFilePaths && validation.errorFilePaths.length > 0) {
+				const fileLinks = validation.errorFilePaths.map(filePath => {
+					const fileName = filePath.split('/').pop()?.replace('.md', '') || filePath;
+					return `<a class="wbs-error-file-link" data-file-path="${filePath}" href="#">📄 ${fileName}</a>`;
+				}).join(' ');
+				errorHtml += `<div class="wbs-validation-error-files">対象ファイル: ${fileLinks}</div>`;
+			}
+			
+			errorDiv.innerHTML = errorHtml;
 		}
 
 		// コンテンツ部分（テーブルまたはガントチャート）
@@ -365,6 +376,15 @@ due-date: 2024-01-31
 				e.preventDefault();
 				const filePath = (e.currentTarget as HTMLElement).dataset.filePath;
 				if (filePath) this.showContextMenu(e as MouseEvent, filePath);
+			});
+		});
+
+		// エラーメッセージ内のファイルリンク（ファイルを開く）
+		container.querySelectorAll('.wbs-error-file-link').forEach(link => {
+			link.addEventListener('click', (e) => {
+				e.preventDefault();
+				const filePath = (e.currentTarget as HTMLElement).dataset.filePath;
+				if (filePath) this.openFile(filePath);
 			});
 		});
 	}
