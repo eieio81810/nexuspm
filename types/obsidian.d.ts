@@ -54,10 +54,81 @@ declare module 'obsidian' {
     getState(): Record<string, unknown>;
   }
 
-  export type MetadataCache = any;
-  export type Vault = any;
-  export type CachedMetadata = any;
+  // Basic Vault / MetadataCache impressions used by code
+  export interface CachedMetadata {
+    frontmatter?: Record<string, unknown>;
+    headings?: Array<{ level: number; heading: string }>;
 
+  }
+
+  export interface MetadataCache {
+    getFileCache(file: TFile): CachedMetadata | null;
+    getFirstLinkpathDest(linkpath: string, sourcePath: string): TFile | null;
+  }
+
+  export interface Vault {
+    read(file: TFile): Promise<string>;
+    getAbstractFileByPath(path: string): TFile | null;
+    getMarkdownFiles(): TFile[];
+    modify?(file: TFile, content: string): Promise<void>;
+  }
+
+  // Simplified Workspace interface for methods used in source
+  export interface Workspace {
+    getLeavesOfType(type: string): WorkspaceLeaf[];
+    revealLeaf(leaf: WorkspaceLeaf): void;
+    getLeaf(type?: string): any;
+    requestSaveLayout(): void;
+    detachLeavesOfType?(type: string): void;
+  }
+
+  // View state result placeholder
+  export type ViewStateResult = any;
+
+  // ItemView class provides app and contentEl used by views
+  export class ItemView implements View {
+    public app: App;
+    public leaf: WorkspaceLeaf;
+    public contentEl: any;
+    constructor(leaf: WorkspaceLeaf) {
+      this.leaf = leaf;
+      this.app = (undefined as unknown) as App;
+      this.contentEl = ({} as any);
+    }
+    getViewType(): string { return '' }
+    getState(): Record<string, unknown> { return {} }
+    async setState(state: Record<string, unknown>, result: ViewStateResult): Promise<void> { return; }
+    getDisplayText(): string { return '' }
+    getIcon(): string { return '' }
+    async onOpen(): Promise<void> { return; }
+    async onClose(): Promise<void> { return; }
+  }
+
+  // Menu / MenuItem minimal types
+  export class MenuItem {
+    setTitle(title: string): this;
+    setIcon(icon: string): this;
+    onClick(cb: () => void): this;
+  }
+
+  export class Menu {
+    addItem(cb: (item: MenuItem) => void): Menu;
+    addSeparator(): void;
+    showAtMouseEvent(e: MouseEvent): void;
+  }
+
+  // Modal minimal type
+  export class Modal {
+    public app: App;
+    public contentEl: any;
+    constructor(app: App) { this.app = app; this.contentEl = {} as any; }
+    open(): void;
+    close(): void;
+    onOpen?(): void;
+    onClose?(): void;
+  }
+
+  // Simple helpers
   export const Workspace: any;
   export const MarkdownView: any;
 }
