@@ -58,6 +58,35 @@ export class WBSRenderer {
 	}
 
 	/**
+	 * タイトル表示用に日付をトリミングし、ツールチップ用の日付文字列を返す
+	 */
+	private formatTitle(item: WBSItem): { text: string; tooltip?: string } {
+		const full = item.title || '';
+		// 優先: frontmatter の startDate/dueDate を使う
+		let datePart: string | undefined;
+		if (item.startDate) {
+			datePart = item.startDate + (item.dueDate ? ` ~ ${item.dueDate}` : '');
+		} else if (item.dueDate) {
+			datePart = item.dueDate;
+		} else {
+			// タイトル先頭にYYYY-MM-DDなどがある場合抽出
+			const m = full.match(/^(\d{4}[-\/\.]\d{2}[-\/\.]\d{2})\s*(.*)$/);
+			if (m) {
+				datePart = m[1];
+				return { text: m[2] || full, tooltip: datePart };
+			}
+		}
+
+		if (datePart) {
+			// タイトルから日付を削る（もし先頭に含まれていれば）
+			const trimmed = full.replace(/^\s*(?:\d{4}[-\/\.]\d{2}[-\/\.]\d{2})\s*/,'').trim();
+			return { text: trimmed || full, tooltip: datePart };
+		}
+
+		return { text: full };
+	}
+
+	/**
 	 * WBSプロジェクトをHTMLテーブルとしてレンダリング
 	 */
 	renderTable(project: WBSProject): string {
@@ -206,9 +235,11 @@ export class WBSRenderer {
 	 * タイトルのレンダリング
 	 */
 	private renderTitle(item: WBSItem): string {
+		const { text, tooltip } = this.formatTitle(item);
+		const titleAttr = tooltip ? ` title="${this.escapeHtml(String(tooltip))}"` : '';
 		return `
-<a class="wbs-title-link" data-file-path="${item.id}" href="#">
-	${this.escapeHtml(item.title)}
+<a class="wbs-title-link" data-file-path="${item.id}" href="#"${titleAttr}>
+	${this.escapeHtml(text)}
 </a>
 		`.trim();
 	}

@@ -321,7 +321,7 @@ export class WBSParser {
 	/**
 	 * ルートアイテムが正確に1つかどうかを検証
 	 */
-	validateSingleRoot(project: WBSProject): { valid: boolean; error?: string } {
+	validateSingleRoot(project: WBSProject): { valid: boolean; error?: string; errorFilePaths?: string[] } {
 		if (project.rootItemIds.length === 0) {
 			return {
 				valid: false,
@@ -335,7 +335,8 @@ export class WBSParser {
 				.join('、');
 			return {
 				valid: false,
-				error: `ルートタスクは1つのみである必要があります。現在${project.rootItemIds.length}個あります: ${rootNames}`
+				error: `ルートタスクは1つのみである必要があります。現在${project.rootItemIds.length}個あります: ${rootNames}`,
+				errorFilePaths: project.rootItemIds
 			};
 		}
 

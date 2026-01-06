@@ -60,7 +60,8 @@ export class WBSGanttRenderer {
 				.map(id => project.items.get(id)?.title || id)
 				.join('、');
 			return this.renderError(
-				`ルートタスクは1つである必要があります。現在${project.rootItemIds.length}個のルートタスクがあります: ${rootNames}`
+				`ルートタスクは1つである必要があります。現在${project.rootItemIds.length}個のルートタスクがあります: ${rootNames}`,
+				project.rootItemIds
 			);
 		}
 
@@ -91,13 +92,22 @@ export class WBSGanttRenderer {
 	/**
 	 * エラー表示
 	 */
-	private renderError(message: string): string {
+	private renderError(message: string, errorFilePaths?: string[]): string {
+		let fileLinksHtml = '';
+		if (errorFilePaths && errorFilePaths.length > 0) {
+			const links = errorFilePaths.map(filePath => {
+				const fileName = filePath.split('/').pop()?.replace('.md', '') || filePath;
+				return `<a class="wbs-error-file-link" data-file-path="${this.escapeHtml(filePath)}" href="#">📄 ${this.escapeHtml(fileName)}</a>`;
+			}).join(' ');
+			fileLinksHtml = `
+	<div class="wbs-gantt-error-files">対象ファイル: ${links}</div>`;
+		}
+		
 		return `
 <div class="wbs-gantt-error">
 	<div class="wbs-gantt-error-icon">⚠️</div>
-	<div class="wbs-gantt-error-message">${message}</div>
-</div>
-		`.trim();
+	<div class="wbs-gantt-error-message">${this.escapeHtml(message)}</div>${fileLinksHtml}
+</div>`.trim();
 	}
 
 	/**
@@ -121,6 +131,32 @@ export class WBSGanttRenderer {
 	}
 
 	/**
+	 * タイトルから日付を抽出してトリムする（ガント用）
+	 */
+	private formatTitleForGantt(item: WBSItem): { text: string; tooltip?: string } {
+		const full = item.title || '';
+		let datePart: string | undefined;
+		if (item.startDate) {
+			datePart = item.startDate + (item.dueDate ? ` ~ ${item.dueDate}` : '');
+		} else if (item.dueDate) {
+			datePart = item.dueDate;
+		} else {
+			const m = full.match(/^(\d{4}[-\/\.]\d{2}[-\/\.]\d{2})\s*(.*)$/);
+			if (m) {
+				datePart = m[1];
+				return { text: m[2] || full, tooltip: datePart };
+			}
+		}
+
+		if (datePart) {
+			const trimmed = full.replace(/^\s*(?:\d{4}[-\/\.]\d{2}[-\/\.]\d{2})\s*/,'').trim();
+			return { text: trimmed || full, tooltip: datePart };
+		}
+
+		return { text: full };
+	}
+
+	/**
 	 * タスク行（固定部分）のレンダリング
 	 */
 	private renderTaskRow(item: WBSItem, project: WBSProject): string {
@@ -129,6 +165,9 @@ export class WBSGanttRenderer {
 		const expandIcon = hasChildren ? (item.isExpanded ? '▼' : '▶') : '';
 		const progress = calculateProgress(item, project.items);
 
+		const { text, tooltip } = this.formatTitleForGantt(item);
+		const titleAttr = tooltip ? ` title="${this.escapeHtml(String(tooltip))}"` : '';
+
 		return `
 <div class="wbs-gantt-row" style="height: ${this.config.rowHeight}px;" data-item-id="${item.id}">
 	<div class="wbs-gantt-col-wbs" style="width: ${this.config.wbsColumnWidth}px;">
@@ -136,7 +175,7 @@ export class WBSGanttRenderer {
 	</div>
 	<div class="wbs-gantt-col-task" style="width: ${this.config.taskColumnWidth}px; padding-left: ${indent}px;">
 		${hasChildren ? `<button class="expand-btn" data-item-id="${item.id}">${expandIcon}</button>` : ''}
-		<a class="wbs-title-link" data-file-path="${item.id}" href="#">${this.escapeHtml(item.title)}</a>
+		<a class="wbs-title-link" data-file-path="${item.id}" href="#"${titleAttr}>${this.escapeHtml(text)}</a>
 		<span class="wbs-gantt-progress-text">${progress}%</span>
 	</div>
 </div>
