@@ -1,9 +1,9 @@
 {
   "id": "nexuspm",
   "name": "NexusPM",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "minAppVersion": "0.15.0",
-  "description": "Display H1 headings as graph node labels instead of file names.",
+  "description": "Project management for Obsidian: WBS view with task metadata, configurable settings, and custom graph view.",
   "author": "eieio81810",
   "authorUrl": "https://github.com/eieio81810",
   "isDesktopOnly": false
