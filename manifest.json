@@ -3,7 +3,7 @@
   "name": "NexusPM",
   "version": "1.0.1",
   "minAppVersion": "0.15.0",
-  "description": "Project management for Obsidian: WBS view with task metadata, configurable settings, and custom graph view.",
+  "description": "Project managemen: WBS view with task metadata, configurable settings, and custom graph view.",
   "author": "eieio81810",
   "authorUrl": "https://github.com/eieio81810",
   "isDesktopOnly": false
