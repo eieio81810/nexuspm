@@ -34,8 +34,10 @@ const context = await esbuild.context({
 - エンコーディング遵守を明記する。
 - ファイル操作関数を明示する: 取得 `get_file` / 作成 `create_file` / 編集 `edit_file` / 削除 `remove_file`。
 - 新機能実装時は必ずテストファーストで進める。
+- **ターミナルからの直接ファイル編集（PowerShellスクリプト等）は行わない**。`edit_file` ツールを使用すること。
 
 ## トラブル対処
 - 文字化け: UTF-8（BOM なし）で再保存。
 - ビルドエラー: エンコーディング指定漏れを確認。
 - テスト失敗: `npm test` でエラー内容を確認し、Red→Green→Refactorサイクルを回す。
+- edit_file失敗時: ファイルがエディタで開かれていることを確認し、再試行する。

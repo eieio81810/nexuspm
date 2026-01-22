@@ -471,9 +471,70 @@ due-date: 2024-01-31
 
 	private async openFile(filePath: string): Promise<void> {
 		const file = this.app.vault.getAbstractFileByPath(filePath);
-		if (file instanceof TFile) {
-			await this.app.workspace.getLeaf('tab').openFile(file);
+		if (!(file instanceof TFile)) return;
+
+		// WBSビューが置かれているペインの反対側にファイルを開く
+		const currentLeaf = this.leaf;
+		const workspace = this.app.workspace;
+		
+		// ワークスペースの構造から、WBSリーフの位置を特定
+		// Obsidianのワークスペースは階層的なスプリットコンテナで構成される
+		const rootSplit = (workspace as any).rootSplit;
+		
+		let targetLeaf: any = null;
+		
+		// ワークスペースをトラバースしてWBSリーフが左右どちらにあるか確認
+		const isWBSOnLeft = (container: any): boolean | null => {
+			if (!container || !container.children) return null;
+			
+			// 最上位の子コンテナをチェック
+			for (let i = 0; i < container.children.length; i++) {
+				const child = container.children[i];
+				
+				// 子がリーフの場合
+				if (child === currentLeaf) {
+					return i === 0; // i === 0なら左側
+				}
+				
+				// 子がコンテナの場合、再帰的に探索
+				if (child.children) {
+					const result = isWBSOnLeft(child);
+					if (result !== null) return result;
+				}
+			}
+			
+			return null;
+		};
+		
+		const wbsOnLeft = isWBSOnLeft(rootSplit);
+		
+		if (wbsOnLeft === true) {
+			// WBSが左側 → 右側に分割して開く
+			targetLeaf = workspace.getLeaf('split', 'vertical');
+		} else if (wbsOnLeft === false) {
+			// WBSが右側 → 左側を探すか、反対側に分割
+			// 既存の左側のペインを探す
+			const tryGetLeftPane = (): any => {
+				if (rootSplit.children && rootSplit.children.length > 0) {
+					return rootSplit.children[0];
+				}
+				return null;
+			};
+			
+			const leftPane = tryGetLeftPane();
+			if (leftPane && leftPane !== currentLeaf && leftPane.children && leftPane.children.length > 0) {
+				// 左側に既存ペインがあり、マークダウンが開けるなら使用
+				targetLeaf = leftPane.children[0];
+			} else {
+				// なければ左に分割
+				targetLeaf = workspace.getLeaf('split', 'vertical');
+			}
+		} else {
+			// 位置が特定できなければフォールバック: 右に分割
+			targetLeaf = workspace.getLeaf('split', 'vertical');
 		}
+
+		await targetLeaf.openFile(file);
 	}
 
 	private showContextMenu(event: MouseEvent, filePath: string): void {
@@ -486,13 +547,14 @@ due-date: 2024-01-31
 		});
 
 		menu.addItem(item => {
-			item.setTitle('新しいタブで開く')
+			item.setTitle('新しいペインで開く')
 				.setIcon('file-plus')
 				.onClick(async () => {
 					const file = this.app.vault.getAbstractFileByPath(filePath);
-					if (file instanceof TFile) {
-						await this.app.workspace.getLeaf('tab').openFile(file);
-					}
+					if (!(file instanceof TFile)) return;
+					// 常に右に分割して新しいペインを作成
+					const newLeaf = this.app.workspace.getLeaf('split', 'vertical');
+					await newLeaf.openFile(file);
 				});
 		});
 
@@ -521,154 +583,6 @@ due-date: 2024-01-31
 		menu.showAtMouseEvent(event);
 	}
 
-	private async addWBSTagToFile(filePath: string): Promise<void> {
-		if (!this.currentProject) return;
-
-		const item = this.currentProject.items.get(filePath);
-		if (!item) return;
-
-		const tagPath = this.buildTagPath(item);
-		
-		const file = this.app.vault.getAbstractFileByPath(filePath);
-		if (!(file instanceof TFile)) return;
-
-		try {
-			const content = await this.app.vault.read(file);
-			const updatedContent = this.addTagToFrontmatter(content, tagPath);
-			await this.app.vault.modify(file, updatedContent);
-			new Notice(`タグ「${tagPath}」を追加しました`);
-		} catch (error) {
-			console.error('Tag add error:', error);
-			new Notice('タグの追加に失敗しました');
-		}
-	}
-
-	private buildTagPath(item: WBSItem): string {
-		if (!this.currentProject) return '';
-
-		const parts: string[] = [];
-		let currentItem: WBSItem | undefined = item;
-
-		while (currentItem) {
-			parts.unshift(currentItem.title.replace(/\s+/g, '-'));
-			if (currentItem.parentId) {
-				currentItem = this.currentProject.items.get(currentItem.parentId);
-			} else {
-				break;
-			}
-		}
-
-		const projectName = this.currentProject.name.replace(/\s+/g, '-');
-		return `${projectName}/${parts.join('/')}`;
-	}
-
-	private addTagToFrontmatter(content: string, tag: string): string {
-		const frontmatterRegex = /^---\n([\s\S]*?)\n---/;
-		const match = content.match(frontmatterRegex);
-
-		if (match) {
-			const frontmatter = match[1];
-			const tagsRegex = /^tags:\s*\n((?:\s+-\s+.+\n)*)/m;
-			const tagsMatch = frontmatter.match(tagsRegex);
-
-			if (tagsMatch) {
-				const existingTags = tagsMatch[1];
-				if (!existingTags.includes(tag)) {
-					const newTags = existingTags + `  - ${tag}\n`;
-					const updatedFrontmatter = frontmatter.replace(tagsRegex, `tags:\n${newTags}`);
-					return content.replace(frontmatterRegex, `---\n${updatedFrontmatter}\n---`);
-				}
-			} else {
-				const updatedFrontmatter = frontmatter + `\ntags:\n  - ${tag}`;
-				return content.replace(frontmatterRegex, `---\n${updatedFrontmatter}\n---`);
-			}
-		} else {
-			return `---\ntags:\n  - ${tag}\n---\n\n${content}`;
-		}
-
-		return content;
-	}
-
-	private async setStatus(filePath: string, status: string): Promise<void> {
-		const file = this.app.vault.getAbstractFileByPath(filePath);
-		if (!(file instanceof TFile)) return;
-
-		try {
-			const content = await this.app.vault.read(file);
-			const updatedContent = this.updateFrontmatter(content, 'status', status);
-			await this.app.vault.modify(file, updatedContent);
-			new Notice(`ステータスを「${status}」に変更しました`);
-			this.scheduleRefresh();
-		} catch (error) {
-			console.error('Status update error:', error);
-			new Notice('ステータスの変更に失敗しました');
-		}
-	}
-
-	private updateFrontmatter(content: string, key: string, value: string): string {
-		const frontmatterRegex = /^---\n([\s\S]*?)\n---/;
-		const match = content.match(frontmatterRegex);
-
-		if (match) {
-			const frontmatter = match[1];
-			const keyRegex = new RegExp(`^${key}:.*$`, 'm');
-			
-			let updatedFrontmatter: string;
-			if (keyRegex.test(frontmatter)) {
-				updatedFrontmatter = frontmatter.replace(keyRegex, `${key}: ${value}`);
-			} else {
-				updatedFrontmatter = frontmatter + `\n${key}: ${value}`;
-			}
-			
-			return content.replace(frontmatterRegex, `---\n${updatedFrontmatter}\n---`);
-		} else {
-			return `---\n${key}: ${value}\n---\n\n${content}`;
-		}
-	}
-
-	private scheduleRefresh(): void {
-		if (this.refreshDebounceTimer) {
-			clearTimeout(this.refreshDebounceTimer);
-		}
-		this.refreshDebounceTimer = setTimeout(() => {
-			this.refresh();
-		}, 300);
-	}
-
-	async refresh(): Promise<void> {
-		console.log('[WBS] Refreshing...');
-		if (this.currentBaseFile) {
-			await this.loadBaseFile(this.currentBaseFile);
-		} else if (this.currentFolder) {
-			await this.loadFolder(this.currentFolder);
-		}
-	}
-
-	onFileChange(file: TFile): void {
-		if (this.currentBaseFile && file.path === this.currentBaseFile) {
-			this.scheduleRefresh();
-			return;
-		}
-		
-		if (this.currentFolder && file.path.startsWith(this.currentFolder)) {
-			// If we have a loaded project, attempt incremental update to avoid full reload
-			if (this.currentProject) {
-				void (async () => {
-					try {
-						await this.parser.updateProjectWithFile(this.currentProject!, file, this.currentFolder);
-						// Re-render view with updated project
-						this.render();
-					} catch (error) {
-						console.error('[WBS] incremental update failed:', error);
-						// Fallback to scheduled full refresh
-						this.scheduleRefresh();
-					}
-				})();
-				return;
-			}
-			this.scheduleRefresh();
-		}
-	}
 }
 
 /**
