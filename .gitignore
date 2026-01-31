@@ -16,3 +16,6 @@ Thumbs.db
 
 # Visual Studio
 .vs/
+
+# Local scratch/tmp files
+.tmp*

@@ -1,4 +1,4 @@
-import { TFile, MetadataCache, Vault, CachedMetadata } from 'obsidian';
+import { TFile, MetadataCache, Vault } from 'obsidian';
 import {
 	WBSItem,
 	WBSProject,
@@ -7,7 +7,6 @@ import {
 	normalizeStatus,
 	calculateStartDate,
 	calculateDueDate,
-	generateWBSNumber,
 	createDefaultWBSItem
 } from './wbsDataModel';
 
@@ -50,7 +49,7 @@ export class WBSParser {
 	/**
 	 * 単一ファイルをパースしてWBSItemを生成
 	 */
-	async parseFile(file: TFile): Promise<WBSItem | null> {
+	parseFile(file: TFile): WBSItem | null {
 		const cache = this.metadataCache.getFileCache(file);
 		const frontmatter = cache?.frontmatter as FrontmatterData | undefined;
 
@@ -127,7 +126,7 @@ export class WBSParser {
 			}
 
 			// Debug log to help diagnose cases where completed isn't applied
-			console.log('[WBS] parseFile completedField:', file.path, completedField, '-> isCompleted:', isCompleted);
+			console.debug('[WBS] parseFile completedField:', file.path, completedField, '-> isCompleted:', isCompleted);
 
 			if (isCompleted) {
 				item.progress = 100;
@@ -174,7 +173,7 @@ export class WBSParser {
 	/**
 	 * フォルダ内のすべてのMarkdownファイルをパースしてWBSProjectを生成
 	 */
-	async parseFolder(folderPath: string): Promise<WBSProject> {
+	parseFolder(folderPath: string): WBSProject {
 		const project: WBSProject = {
 			id: folderPath,
 			name: folderPath.split('/').pop() || folderPath,
@@ -191,7 +190,7 @@ export class WBSParser {
 
 		// 各ファイルをパース
 		for (const file of folderFiles) {
-			const item = await this.parseFile(file);
+			const item = this.parseFile(file);
 			if (item) {
 				project.items.set(file.path, item);
 			}
@@ -212,9 +211,9 @@ export class WBSParser {
 	/**
 	 * 単一ファイルの変更をプロジェクトに反映し、関係・WBS番号・レベルを更新する
 	 */
-	async updateProjectWithFile(project: WBSProject, file: TFile, folderPath: string): Promise<void> {
+	updateProjectWithFile(project: WBSProject, file: TFile, folderPath: string): void {
 		// Re-parse the file and update project map
-		const item = await this.parseFile(file);
+		const item = this.parseFile(file);
 
 		if (item) {
 			project.items.set(file.path, item);
@@ -303,7 +302,7 @@ export class WBSParser {
 		}
 
 		// basename で検索
-		for (const [itemPath, item] of items) {
+		for (const [itemPath] of items) {
 			const basename = itemPath.split('/').pop()?.replace('.md', '');
 			if (basename === parentId) {
 				return itemPath;

@@ -1,7 +1,6 @@
 import {
 	WBSItem,
 	WBSProject,
-	WBSStatus,
 	WBS_STATUS_COLORS,
 	calculateProgress
 } from './wbsDataModel';
@@ -141,7 +140,7 @@ export class WBSGanttRenderer {
 		} else if (item.dueDate) {
 			datePart = item.dueDate;
 		} else {
-			const m = full.match(/^(\d{4}[-\/\.]\d{2}[-\/\.]\d{2})\s*(.*)$/);
+			const m = full.match(/^(\d{4}[-/.]\d{2}[-/.]\d{2})\s*(.*)$/);
 			if (m) {
 				datePart = m[1];
 				return { text: m[2] || full, tooltip: datePart };
@@ -149,7 +148,7 @@ export class WBSGanttRenderer {
 		}
 
 		if (datePart) {
-			const trimmed = full.replace(/^\s*(?:\d{4}[-\/\.]\d{2}[-\/\.]\d{2})\s*/,'').trim();
+			const trimmed = full.replace(/^\s*(?:\d{4}[-/.]\d{2}[-/.]\d{2})\s*/, '').trim();
 			return { text: trimmed || full, tooltip: datePart };
 		}
 
@@ -190,7 +189,7 @@ export class WBSGanttRenderer {
 		const months: { name: string; days: number; startOffset: number }[] = [];
 		const days: { date: Date; dayOfWeek: number }[] = [];
 
-		let currentDate = new Date(start);
+		const currentDate = new Date(start);
 		let currentMonth = -1;
 		let monthStartOffset = 0;
 
@@ -228,7 +227,7 @@ export class WBSGanttRenderer {
 			`<div class="wbs-gantt-month" style="width: ${m.days * this.config.dayWidth}px;">${m.name}</div>`
 		).join('');
 
-		const dayHeaders = days.map((d, i) => {
+		const dayHeaders = days.map((d) => {
 			const isWeekend = d.dayOfWeek === 0 || d.dayOfWeek === 6;
 			const dayNum = d.date.getDate();
 			return `<div class="wbs-gantt-day${isWeekend ? ' weekend' : ''}" style="width: ${this.config.dayWidth}px;">${dayNum}</div>`;
@@ -293,7 +292,7 @@ export class WBSGanttRenderer {
 		 style="left: ${left}px; width: ${width}px; background-color: ${barColor}40; border-color: ${barColor};"
 		 title="${this.escapeHtml(item.title)} (${item.startDate || '?'} ~ ${item.dueDate || '?'})">
 		<div class="wbs-gantt-bar-progress" style="width: ${progress}%; background-color: ${barColor};"></div>
-		${hasChildren ? this.renderSummaryMilestones(item, project, dateRange) : ''}
+		${hasChildren ? this.renderSummaryMilestones() : ''}
 	</div>
 </div>
 		`.trim();
@@ -302,7 +301,7 @@ export class WBSGanttRenderer {
 	/**
 	 * サマリータスクのマイルストーン表示
 	 */
-	private renderSummaryMilestones(item: WBSItem, project: WBSProject, dateRange: DateRange): string {
+	private renderSummaryMilestones(): string {
 		// サマリータスクには開始/終了マーカーを表示
 		return `<div class="wbs-gantt-bar-start"></div><div class="wbs-gantt-bar-end"></div>`;
 	}
@@ -315,7 +314,7 @@ export class WBSGanttRenderer {
 		const lines: string[] = [];
 		const totalHeight = rowCount * this.config.rowHeight;
 
-		let currentDate = new Date(start);
+		const currentDate = new Date(start);
 		for (let i = 0; i < totalDays; i++) {
 			const isWeekend = currentDate.getDay() === 0 || currentDate.getDay() === 6;
 			const x = i * this.config.dayWidth;

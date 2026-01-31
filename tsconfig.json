@@ -3,7 +3,7 @@
     "baseUrl": ".",
     "inlineSourceMap": true,
     "inlineSources": true,
-    "module": "ESNext",
+    "module": "NodeNext",
     "target": "ES6",
     "allowJs": true,
     "noImplicitAny": true,
@@ -26,14 +26,12 @@
     "paths": {
       "obsidian": [
         "node_modules/obsidian/obsidian.d.ts",
-        "types/obsidian.d.ts"
       ]
     }
   },
   "include": [
     "**/*.ts",
     "node_modules/obsidian/obsidian.d.ts",
-    "tests/__types__/**/*.d.ts",
     "types/**/*.d.ts"
   ]
 }

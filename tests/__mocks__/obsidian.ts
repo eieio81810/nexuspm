@@ -5,10 +5,11 @@ export class TFile {
 	extension: string;
 	basename: string;
 
-	constructor(path: string) {
-		this.path = path;
-		this.extension = path.split('.').pop() || '';
-		this.basename = path.split('/').pop()?.replace(/\.\w+$/, '') || '';
+	constructor(path?: string) {
+		const p = path ?? '';
+		this.path = p;
+		this.extension = p.split('.').pop() || '';
+		this.basename = p.split('/').pop()?.replace(/\.\w+$/, '') || '';
 	}
 }
 

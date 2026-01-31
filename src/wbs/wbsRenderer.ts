@@ -70,7 +70,7 @@ export class WBSRenderer {
 			datePart = item.dueDate;
 		} else {
 			// タイトル先頭にYYYY-MM-DDなどがある場合抽出
-			const m = full.match(/^(\d{4}[-\/\.]\d{2}[-\/\.]\d{2})\s*(.*)$/);
+			const m = full.match(/^(\d{4}[-/.]\d{2}[-/.]\d{2})\s*(.*)$/);
 			if (m) {
 				datePart = m[1];
 				return { text: m[2] || full, tooltip: datePart };
@@ -79,7 +79,7 @@ export class WBSRenderer {
 
 		if (datePart) {
 			// タイトルから日付を削る（もし先頭に含まれていれば）
-			const trimmed = full.replace(/^\s*(?:\d{4}[-\/\.]\d{2}[-\/\.]\d{2})\s*/,'').trim();
+			const trimmed = full.replace(/^\s*(?:\d{4}[-/.]\d{2}[-/.]\d{2})\s*/, '').trim();
 			return { text: trimmed || full, tooltip: datePart };
 		}
 
@@ -161,7 +161,7 @@ export class WBSRenderer {
 	private renderCell(item: WBSItem, column: WBSColumn, allItems: Map<string, WBSItem>): string {
 		let content: string;
 
-		switch (column) {
+			switch (column) {
 			case 'wbs':
 				content = this.renderWBSNumber(item);
 				break;
@@ -180,12 +180,14 @@ export class WBSRenderer {
 			case 'dueDate':
 				content = this.renderDueDate(item);
 				break;
-			case 'progress':
-				const progress = item.childIds.length > 0 
-					? calculateProgress(item, allItems)
-					: item.progress || (item.status === 'completed' ? 100 : item.status === 'in-progress' ? 50 : 0);
-				content = this.renderProgressBar(progress);
-				break;
+				case 'progress':
+				{
+					const progress = item.childIds.length > 0 
+						? calculateProgress(item, allItems)
+						: item.progress || (item.status === 'completed' ? 100 : item.status === 'in-progress' ? 50 : 0);
+					content = this.renderProgressBar(progress);
+					break;
+				}
 			case 'priority':
 				content = item.priority !== null ? this.renderPriority(item.priority) : '-';
 				break;

@@ -160,8 +160,15 @@ describe('GraphLabelManager', () => {
 		});
 
 		it('should handle canvas file node referencing markdown file', async () => {
-			const mockCanvasFile = { path: 'test.canvas', extension: 'canvas' } as TFile;
-			const mockMdFile = { path: 'referenced.md', extension: 'md' } as TFile;
+			const mockCanvasFile = new TFile();
+			mockCanvasFile.path = 'test.canvas';
+			mockCanvasFile.extension = 'canvas';
+			mockCanvasFile.basename = 'test';
+
+			const mockMdFile = new TFile();
+			mockMdFile.path = 'referenced.md';
+			mockMdFile.extension = 'md';
+			mockMdFile.basename = 'referenced';
 			
 			const canvasContent = JSON.stringify({
 				nodes: [

@@ -1,6 +1,8 @@
-import { App, Plugin, PluginSettingTab, Setting, Notice, TFile, TFolder, WorkspaceLeaf } from 'obsidian';
-import { GraphLabelManager } from './src/graphLabelManager';
-import { WBSView, WBS_VIEW_TYPE } from './src/wbs/wbsView';
+/* eslint-disable obsidianmd/ui/sentence-case */
+
+import { App, Plugin, PluginSettingTab, Setting, Notice, TFile, TFolder, WorkspaceLeaf, Menu, MenuItem, TAbstractFile } from 'obsidian';
+import { GraphLabelManager } from './src/graphLabelManager.js';
+import { WBSView, WBS_VIEW_TYPE } from './src/wbs/wbsView.js';
 
 interface HadocommunPluginSettings {
 	greeting: string;
@@ -44,6 +46,9 @@ const DEFAULT_SETTINGS: HadocommunPluginSettings = {
 	wbsEnabled: true
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+	!!value && typeof value === 'object';
+
 export default class HadocommunPlugin extends Plugin {
 	settings: HadocommunPluginSettings;
 	private currentRenderer: GraphRenderer | null = null;
@@ -66,21 +71,22 @@ export default class HadocommunPlugin extends Plugin {
 		);
 
 		const ribbonIconEl = this.addRibbonIcon('dice', 'Hadocommun', (evt: MouseEvent) => {
+			void evt;
 			new Notice(this.settings.greeting);
 		});
 		ribbonIconEl.addClass('hadocommun-ribbon-class');
 
 		// WBS リボンアイコンを追加
 		if (this.settings.wbsEnabled) {
-			const wbsRibbonEl = this.addRibbonIcon('layout-list', 'Open WBS View', async () => {
-				await this.activateWBSView();
+			const wbsRibbonEl = this.addRibbonIcon('layout-list', 'WBSビューを開く', () => {
+				void this.activateWBSView().catch((err) => console.error('[Hadocommun] WBSビューの起動に失敗しました', err));
 			});
 			wbsRibbonEl.addClass('wbs-ribbon-class');
 		}
 
 		this.addCommand({
 			id: 'show-greeting',
-			name: 'Show greeting message',
+			name: '挨拶メッセージを表示',
 			callback: () => {
 				new Notice(this.settings.greeting);
 			}
@@ -89,21 +95,21 @@ export default class HadocommunPlugin extends Plugin {
 		// WBS コマンドを追加
 		this.addCommand({
 			id: 'open-wbs-view',
-			name: 'Open WBS View',
-			callback: async () => {
-				await this.activateWBSView();
+			name: 'WBSビューを開く',
+			callback: () => {
+				void this.activateWBSView().catch((err) => console.error('[Hadocommun] WBSビューの起動に失敗しました', err));
 			}
 		});
 
 		this.addCommand({
 			id: 'open-folder-as-wbs',
-			name: 'Open current folder as WBS',
+			name: '現在のフォルダをWBSとして開く',
 			checkCallback: (checking: boolean) => {
 				const activeFile = this.app.workspace.getActiveFile();
 				if (activeFile) {
 					if (!checking) {
 						const folderPath = activeFile.parent?.path || '';
-						this.openFolderAsWBS(folderPath);
+						void this.openFolderAsWBS(folderPath).catch((err) => console.error('[Hadocommun] フォルダをWBSとして開けませんでした', err));
 					}
 					return true;
 				}
@@ -114,7 +120,7 @@ export default class HadocommunPlugin extends Plugin {
 		// WBSタグをコピーするコマンド
 		this.addCommand({
 			id: 'copy-wbs-tags',
-			name: 'Copy WBS tags to clipboard',
+			name: 'WBSタグをクリップボードにコピー',
 			checkCallback: (checking: boolean) => {
 				const leaves = this.app.workspace.getLeavesOfType(WBS_VIEW_TYPE);
 				if (leaves.length > 0) {
@@ -123,9 +129,11 @@ export default class HadocommunPlugin extends Plugin {
 						if (view && typeof view.generateWBSTags === 'function') {
 							const tags = view.generateWBSTags();
 							if (tags.length > 0) {
-								const yamlTags = tags.map(t => `  - ${t}`).join('\n');
-								navigator.clipboard.writeText(`tags:\n${yamlTags}`);
-								new Notice('WBSタグをクリップボードにコピーしました');
+								const yamlTags = tags.map((t: string) => `  - ${t}`).join('\n');
+								void navigator.clipboard
+									.writeText(`tags:\n${yamlTags}`)
+									.then(() => new Notice('WBSタグをクリップボードにコピーしました'))
+									.catch((err) => console.error('[Hadocommun] WBSタグのコピーに失敗しました', err));
 							}
 						}
 					}
@@ -139,25 +147,25 @@ export default class HadocommunPlugin extends Plugin {
 
 		// ファイルエクスプローラーのコンテキストメニューを拡張
 		this.registerEvent(
-			this.app.workspace.on('file-menu', (menu, file) => {
+			this.app.workspace.on('file-menu', (menu: Menu, file: TAbstractFile) => {
 				// フォルダの場合
 				if (file instanceof TFolder) {
-					menu.addItem((item) => {
+					menu.addItem((item: MenuItem) => {
 						item.setTitle('WBSとして開く')
 							.setIcon('layout-list')
-							.onClick(async () => {
-								await this.openFolderAsWBS(file.path);
+							.onClick(() => {
+								void this.openFolderAsWBS(file.path).catch((err) => console.error('[Hadocommun] フォルダをWBSとして開けませんでした', err));
 							});
 					});
 				}
 				
 				// .baseファイルの場合
 				if (file instanceof TFile && file.extension === 'base') {
-					menu.addItem((item) => {
+					menu.addItem((item: MenuItem) => {
 						item.setTitle('WBSとして開く')
 							.setIcon('layout-list')
-							.onClick(async () => {
-								await this.openBaseFileAsWBS(file.path);
+							.onClick(() => {
+								void this.openBaseFileAsWBS(file.path).catch((err) => console.error('[Hadocommun] .baseファイルをWBSとして開けませんでした', err));
 							});
 					});
 				}
@@ -181,7 +189,7 @@ export default class HadocommunPlugin extends Plugin {
 		);
 
 		this.registerEvent(
-			this.app.vault.on('modify', (file) => {
+			this.app.vault.on('modify', (file: TAbstractFile) => {
 				if (file instanceof TFile) {
 					if (file.extension === 'md' || file.extension === 'canvas') {
 						this.labelManager.invalidateFileCache(file.path);
@@ -193,7 +201,7 @@ export default class HadocommunPlugin extends Plugin {
 		);
 
 		this.registerEvent(
-			this.app.vault.on('rename', (file, oldPath) => {
+			this.app.vault.on('rename', (file: TAbstractFile, oldPath: string) => {
 				if (file instanceof TFile && (file.extension === 'md' || file.extension === 'canvas')) {
 					this.labelManager.invalidateFileCache(oldPath);
 					this.labelManager.invalidateFileCache(file.path);
@@ -202,7 +210,7 @@ export default class HadocommunPlugin extends Plugin {
 		);
 
 		this.registerEvent(
-			this.app.vault.on('create', (file) => {
+			this.app.vault.on('create', (file: TAbstractFile) => {
 				if (file instanceof TFile) {
 					this.notifyWBSViews(file);
 				}
@@ -210,7 +218,7 @@ export default class HadocommunPlugin extends Plugin {
 		);
 
 		this.registerEvent(
-			this.app.vault.on('delete', (file) => {
+			this.app.vault.on('delete', (file: TAbstractFile) => {
 				if (file instanceof TFile) {
 					this.refreshAllWBSViews();
 				}
@@ -221,11 +229,26 @@ export default class HadocommunPlugin extends Plugin {
 	onunload() {
 		this.stopLabelLoop();
 		this.resetGraphLabels();
-		this.app.workspace.detachLeavesOfType(WBS_VIEW_TYPE);
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		const loaded: unknown = await this.loadData();
+		const persisted = isRecord(loaded) ? loaded : {};
+		this.settings = {
+			...DEFAULT_SETTINGS,
+			greeting:
+				typeof persisted.greeting === 'string'
+					? persisted.greeting
+					: DEFAULT_SETTINGS.greeting,
+			useH1ForGraphNodes:
+				typeof persisted.useH1ForGraphNodes === 'boolean'
+					? persisted.useH1ForGraphNodes
+					: DEFAULT_SETTINGS.useH1ForGraphNodes,
+			wbsEnabled:
+				typeof persisted.wbsEnabled === 'boolean'
+					? persisted.wbsEnabled
+					: DEFAULT_SETTINGS.wbsEnabled,
+		};
 	}
 
 	async saveSettings() {
@@ -306,7 +329,7 @@ export default class HadocommunPlugin extends Plugin {
 		const linkDest = this.app.metadataCache.getFirstLinkpathDest(nodeId.replace(/\.(md|canvas)$/i, ''), '');
 		if (linkDest) return linkDest;
 		
-		const byBase = this.app.vault.getMarkdownFiles().find(f => f.basename === nodeId || f.path === nodeId || f.path.endsWith(`/${nodeId}`));
+		const byBase = this.app.vault.getMarkdownFiles().find((f: TFile) => f.basename === nodeId || f.path === nodeId || f.path.endsWith(`/${nodeId}`));
 		return byBase ?? null;
 	}
 
@@ -364,10 +387,8 @@ export default class HadocommunPlugin extends Plugin {
 
 	startLabelLoop() {
 		if (this.labelInterval !== null) return;
-		const run = async () => {
-			await this.updateGraphLabels();
-		};
-		void run();
+		const run = () => void this.updateGraphLabels();
+		void this.updateGraphLabels();
 		this.labelInterval = window.setInterval(run, 500);
 		this.registerInterval(this.labelInterval);
 	}
@@ -378,7 +399,7 @@ export default class HadocommunPlugin extends Plugin {
 	private notifyWBSViews(file: TFile): void {
 		const leaves = this.app.workspace.getLeavesOfType(WBS_VIEW_TYPE);
 		for (const leaf of leaves) {
-			const view = leaf.view as WBSView;
+			const view = leaf.view as unknown as { onFileChange?: (file: TFile) => void };
 			if (view && typeof view.onFileChange === 'function') {
 				view.onFileChange(file);
 			}
@@ -391,7 +412,7 @@ export default class HadocommunPlugin extends Plugin {
 	private refreshAllWBSViews(): void {
 		const leaves = this.app.workspace.getLeavesOfType(WBS_VIEW_TYPE);
 		for (const leaf of leaves) {
-			const view = leaf.view as WBSView;
+			const view = leaf.view as unknown as { refresh?: () => void };
 			if (view && typeof view.refresh === 'function') {
 				view.refresh();
 			}
@@ -413,7 +434,7 @@ export default class HadocommunPlugin extends Plugin {
 			await leaf.setViewState({ type: WBS_VIEW_TYPE, active: true });
 		}
 
-		workspace.revealLeaf(leaf);
+		await workspace.revealLeaf(leaf);
 		return leaf;
 	}
 
@@ -421,7 +442,7 @@ export default class HadocommunPlugin extends Plugin {
 	 * フォルダをWBSとして開く
 	 */
 	async openFolderAsWBS(folderPath: string): Promise<void> {
-		console.log('[WBS] Opening folder as WBS:', folderPath);
+		console.debug('[WBS] Opening folder as WBS:', folderPath);
 		
 		// 既存のWBSビューを探すか、新しいタブを作成
 		let leaf = this.app.workspace.getLeavesOfType(WBS_VIEW_TYPE)[0];
@@ -435,7 +456,7 @@ export default class HadocommunPlugin extends Plugin {
 			});
 		} else {
 			// 既存のビューにフォルダをロード
-			this.app.workspace.revealLeaf(leaf);
+			await this.app.workspace.revealLeaf(leaf);
 			const view = leaf.view as WBSView;
 			if (view && typeof view.loadFolder === 'function') {
 				await view.loadFolder(folderPath);
@@ -447,7 +468,7 @@ export default class HadocommunPlugin extends Plugin {
 	 * .baseファイルをWBSとして開く
 	 */
 	async openBaseFileAsWBS(baseFilePath: string): Promise<void> {
-		console.log('[WBS] Opening base file as WBS:', baseFilePath);
+		console.debug('[WBS] Opening base file as WBS:', baseFilePath);
 		
 		let leaf = this.app.workspace.getLeavesOfType(WBS_VIEW_TYPE)[0];
 		
@@ -459,7 +480,7 @@ export default class HadocommunPlugin extends Plugin {
 				state: { baseFile: baseFilePath }
 			});
 		} else {
-			this.app.workspace.revealLeaf(leaf);
+			await this.app.workspace.revealLeaf(leaf);
 			const view = leaf.view as WBSView;
 			if (view && typeof view.loadBaseFile === 'function') {
 				await view.loadBaseFile(baseFilePath);
@@ -476,32 +497,32 @@ class HadocommunSettingTab extends PluginSettingTab {
 		this.plugin = plugin;
 	}
 
-	display(): void {
-		const {containerEl} = this;
+		display(): void {
+			const {containerEl} = this;
 
 		containerEl.empty();
 
 		new Setting(containerEl)
-			.setName('Appearance')
+			.setName('表示')
 			.setHeading();
 
 		new Setting(containerEl)
-			.setName('Greeting message')
+			.setName('挨拶メッセージ')
 			.setDesc('メッセージ通知に表示される挨拶文')
 			.addText(text => text
-				.setPlaceholder('Enter your greeting')
+				.setPlaceholder('挨拶を入力')
 				.setValue(this.plugin.settings.greeting)
-				.onChange(async (value) => {
+				.onChange(async (value: string) => {
 					this.plugin.settings.greeting = value;
 					await this.plugin.saveSettings();
 				}));
 
 		new Setting(containerEl)
-			.setName('Use H1 for graph node labels')
-			.setDesc('Display the first H1 heading of each file as its label in graph view')
+			.setName('グラフノードのラベルに見出し1を使う')
+			.setDesc('グラフビューで、各ファイルの最初の見出し1をラベルとして表示します')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.useH1ForGraphNodes)
-				.onChange(async (value) => {
+				.onChange(async (value: boolean) => {
 					this.plugin.settings.useH1ForGraphNodes = value;
 					await this.plugin.saveSettings();
 					if (value) {
@@ -515,22 +536,22 @@ class HadocommunSettingTab extends PluginSettingTab {
 				}));
 
 		new Setting(containerEl)
-			.setName('WBS View')
+			.setName('WBSビュー')
 			.setHeading();
 
 		new Setting(containerEl)
-			.setName('Enable WBS View')
+			.setName('WBSビューを有効化')
 			.setDesc('フォルダ内のタスクをWBS（Work Breakdown Structure）形式で表示・管理します')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.wbsEnabled)
-				.onChange(async (value) => {
+				.onChange(async (value: boolean) => {
 					this.plugin.settings.wbsEnabled = value;
 					await this.plugin.saveSettings();
 				}));
 
-		// WBS使用方法のヘルプ
-		const wbsHelp = containerEl.createDiv({ cls: 'setting-item' });
-		wbsHelp.innerHTML = `
+			// WBS使用方法のヘルプ
+			const wbsHelp = containerEl.createDiv({ cls: 'setting-item' });
+			wbsHelp.appendChild(document.createRange().createContextualFragment(`
 <div class="setting-item-info">
 	<div class="setting-item-name">WBSの使い方</div>
 	<div class="setting-item-description">
@@ -548,6 +569,6 @@ class HadocommunSettingTab extends PluginSettingTab {
 		</ol>
 	</div>
 </div>
-		`;
-	}
+			`));
+		}
 }

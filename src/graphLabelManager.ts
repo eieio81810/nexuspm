@@ -1,15 +1,7 @@
 import { TFile, MetadataCache, Vault } from 'obsidian';
 
-interface CanvasNode {
-	id?: string;
-	type?: string;
-	text?: string;
-	file?: string;
-}
-
-interface CanvasData {
-	nodes?: CanvasNode[];
-}
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+	!!value && typeof value === 'object';
 
 export class GraphLabelManager {
 	private h1Cache = new Map<string, string | null>();
@@ -48,26 +40,32 @@ export class GraphLabelManager {
 	private async getFirstH1FromCanvas(canvasFile: TFile): Promise<string | null> {
 		try {
 			const content = await this.vault.read(canvasFile);
-			const canvasData: CanvasData = JSON.parse(content);
-			
-			if (!canvasData.nodes || !Array.isArray(canvasData.nodes)) {
+			const parsed: unknown = JSON.parse(content);
+			if (!isRecord(parsed)) {
+				return null;
+			}
+
+			const nodes = parsed.nodes;
+			if (!Array.isArray(nodes)) {
 				return null;
 			}
 
 			// テキストノードから最初のH1を探す
-			for (const node of canvasData.nodes) {
-				if (node.type === 'text' && node.text) {
+			for (const node of nodes) {
+				if (!isRecord(node)) continue;
+				if (node.type === 'text' && typeof node.text === 'string') {
 					const h1 = this.extractH1FromText(node.text);
 					if (h1) return h1;
 				}
 			}
 
 			// ファイル参照ノードから最初のH1を探す
-			for (const node of canvasData.nodes) {
-				if (node.type === 'file' && node.file) {
+			for (const node of nodes) {
+				if (!isRecord(node)) continue;
+				if (node.type === 'file' && typeof node.file === 'string') {
 					const referencedFile = this.vault.getAbstractFileByPath(node.file);
-					if (referencedFile && 'path' in referencedFile) {
-						const h1 = await this.getFirstH1(referencedFile as TFile);
+					if (referencedFile && referencedFile instanceof TFile) {
+						const h1 = await this.getFirstH1(referencedFile);
 						if (h1) return h1;
 					}
 				}

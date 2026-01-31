@@ -1,5 +1,9 @@
 # GitHub Copilot カスタム指示書
 
+## 役割定義（重要）
+- **あなたはマネージャー/オーケストレーター**：実装は委託、タスク細分化、PDCA 構築
+- マネージャーとして指示を明確にし、実装は別エージェントに任せること
+
 ## エンコーディング
 - すべて UTF-8（BOM なし）。他エンコーディング禁止。文字化けしたら UTF-8 で再保存。
 - esbuild は必ず `charset: 'utf8'`。webpack も出力を UTF-8 固定。
@@ -18,7 +22,7 @@ const context = await esbuild.context({
 - 一連の流れ（README 準拠）:
   1. `npm run dev` で開発（``）。
   2. `npm run build`。
-  3. `Copy-Item -Path main.js,manifest.json -Destination docs/.obsidian/plugins/nexuspm/ -Force` で docs 配下の開発用プラグインを更新。
+  3. `Copy-Item -Path main.js,manifest.json,styles.css -Destination docs/.obsidian/plugins/nexuspm/ -Force` で docs 配下の開発用プラグインを更新。
 
 ## テスト駆動開発 (TDD) ワークフロー
 - **Red → Green → Refactor** のサイクルを守る。

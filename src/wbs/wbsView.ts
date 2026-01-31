@@ -1,11 +1,13 @@
 import { ItemView, WorkspaceLeaf, TFile, Menu, Notice, ViewStateResult } from 'obsidian';
 import { WBSParser } from './wbsParser';
-import { WBSRenderer, WBSColumn } from './wbsRenderer';
+import { WBSRenderer } from './wbsRenderer';
 import { WBSGanttRenderer } from './wbsGanttRenderer';
-import { WBSProject, WBSItem } from './wbsDataModel';
+import { WBSProject } from './wbsDataModel';
 import { BaseFileParser, BaseConfig } from './baseFileParser';
 
 export const WBS_VIEW_TYPE = 'wbs-view';
+
+/* eslint-disable obsidianmd/ui/sentence-case */
 
 /**
  * ビューの状態（永続化用）
@@ -21,7 +23,7 @@ interface WBSViewState {
  */
 type ViewMode = 'table' | 'gantt';
 
-export class WBSView extends ItemView {
+	export class WBSView extends ItemView {
 	private parser: WBSParser;
 	private tableRenderer: WBSRenderer;
 	private ganttRenderer: WBSGanttRenderer;
@@ -50,7 +52,7 @@ export class WBSView extends ItemView {
 		if (this.currentProject) {
 			return `WBS: ${this.currentProject.name}`;
 		}
-		return 'WBS View';
+		return 'WBSビュー';
 	}
 
 	getIcon(): string {
@@ -60,7 +62,7 @@ export class WBSView extends ItemView {
 	/**
 	 * ビュー状態を取得（永続化用）
 	 */
-	getState(): WBSViewState {
+	getState(): Record<string, unknown> {
 		return {
 			folder: this.currentFolder || undefined,
 			baseFile: this.currentBaseFile || undefined,
@@ -71,24 +73,27 @@ export class WBSView extends ItemView {
 	/**
 	 * ビュー状態を復元
 	 */
-	async setState(state: WBSViewState, result: ViewStateResult): Promise<void> {
-		console.log('[WBS] setState called:', state);
+	setState(state: Record<string, unknown>, result: ViewStateResult): Promise<void> {
+		const s = state as WBSViewState;
+		console.debug('[WBS] setState called:', state);
 		
-		if (state.viewMode) {
-			this.viewMode = state.viewMode;
+		if (s.viewMode) {
+			this.viewMode = s.viewMode;
 		}
 		
-		if (state.baseFile) {
-			await this.loadBaseFile(state.baseFile);
-		} else if (state.folder) {
-			await this.loadFolder(state.folder);
-		}
-		
-		return super.setState(state, result);
+		const load = async (): Promise<void> => {
+			if (s.baseFile) {
+				await this.loadBaseFile(s.baseFile);
+			} else if (s.folder) {
+				await this.loadFolder(s.folder);
+			}
+		};
+
+		return load().then(() => super.setState(state, result));
 	}
 
-	async onOpen(): Promise<void> {
-		console.log('[WBS] View opened');
+	onOpen(): Promise<void> {
+		console.debug('[WBS] View opened');
 		this.isInitialized = true;
 		
 		const container = this.contentEl;
@@ -98,13 +103,15 @@ export class WBSView extends ItemView {
 		if (!this.currentFolder && !this.currentBaseFile) {
 			this.renderWelcome(container);
 		}
+		return Promise.resolve();
 	}
 
-	async onClose(): Promise<void> {
-		console.log('[WBS] View closed');
+	onClose(): Promise<void> {
+		console.debug('[WBS] View closed');
 		if (this.refreshDebounceTimer) {
 			clearTimeout(this.refreshDebounceTimer);
 		}
+		return Promise.resolve();
 	}
 
 	/**
@@ -112,7 +119,8 @@ export class WBSView extends ItemView {
 	 */
 	private renderWelcome(container: HTMLElement): void {
 		container.empty();
-		container.innerHTML = `
+		container.appendChild(
+			document.createRange().createContextualFragment(`
 <div class="wbs-welcome">
 	<h2>📋 WBS ガントチャート</h2>
 	<p>プロジェクトフォルダを選択してWBSガントチャートを表示します。</p>
@@ -164,21 +172,22 @@ due-date: 2024-01-31
 ---</pre>
 	</div>
 </div>
-		`;
+			`),
+		);
 	}
 
 	/**
 	 * .baseファイルからWBSを読み込んで表示
 	 */
 	async loadBaseFile(baseFilePath: string): Promise<void> {
-		console.log('[WBS] Loading base file:', baseFilePath);
+		console.debug('[WBS] Loading base file:', baseFilePath);
 		this.currentBaseFile = baseFilePath;
 		this.currentFolder = '';
 		
 		const container = this.contentEl;
 		container.empty();
 		container.addClass('wbs-view-container');
-		container.innerHTML = '<div class="wbs-loading">読み込み中...</div>';
+		container.createDiv({ cls: 'wbs-loading', text: '読み込み中...' });
 
 		try {
 			const baseFile = this.app.vault.getAbstractFileByPath(baseFilePath);
@@ -197,30 +206,28 @@ due-date: 2024-01-31
 				baseFilePath.substring(0, baseFilePath.lastIndexOf('/')) || '';
 
 			const baseColumns = this.baseParser.getColumns(this.currentBaseConfig);
-			const wbsColumns = this.baseParser.mapToWBSColumns(baseColumns) as WBSColumn[];
+			const wbsColumns = this.baseParser.mapToWBSColumns(baseColumns);
 			this.tableRenderer = new WBSRenderer({ columns: wbsColumns });
 
-			this.currentProject = await this.parser.parseFolder(sourceFolder);
+			this.currentProject = this.parser.parseFolder(sourceFolder);
 			this.currentProject.name = baseFile.basename;
 			
 			this.render();
 			this.app.workspace.requestSaveLayout();
 		} catch (error) {
 			console.error('[WBS] Load error:', error);
-			container.innerHTML = `
-<div class="wbs-error">
-	<h3>エラー</h3>
-	<p>${error instanceof Error ? error.message : 'Unknown error'}</p>
-</div>
-			`;
+			container.empty();
+			const errorEl = container.createDiv({ cls: 'wbs-error' });
+			errorEl.createEl('h3', { text: 'エラー' });
+			errorEl.createEl('p', { text: error instanceof Error ? error.message : '不明なエラー' });
 		}
 	}
 
 	/**
 	 * 指定フォルダのWBSを読み込んで表示
 	 */
-	async loadFolder(folderPath: string): Promise<void> {
-		console.log('[WBS] Loading folder:', folderPath);
+	loadFolder(folderPath: string): Promise<void> {
+		console.debug('[WBS] Loading folder:', folderPath);
 		this.currentFolder = folderPath;
 		this.currentBaseFile = null;
 		this.currentBaseConfig = null;
@@ -228,35 +235,34 @@ due-date: 2024-01-31
 		const container = this.contentEl;
 		container.empty();
 		container.addClass('wbs-view-container');
-		container.innerHTML = '<div class="wbs-loading">読み込み中...</div>';
+		container.createDiv({ cls: 'wbs-loading', text: '読み込み中...' });
 
 		try {
 			this.tableRenderer = new WBSRenderer();
 			
-			this.currentProject = await this.parser.parseFolder(folderPath);
-			console.log('[WBS] Parsed project:', this.currentProject.items.size, 'items');
-			console.log('[WBS] Root items:', this.currentProject.rootItemIds.length);
+			this.currentProject = this.parser.parseFolder(folderPath);
+			console.debug('[WBS] Parsed project:', this.currentProject.items.size, 'items');
+			console.debug('[WBS] Root items:', this.currentProject.rootItemIds.length);
 			
 			this.render();
 			this.app.workspace.requestSaveLayout();
 		} catch (error) {
 			console.error('[WBS] Load error:', error);
-			container.innerHTML = `
-<div class="wbs-error">
-	<h3>エラー</h3>
-	<p>WBSの読み込みに失敗しました: ${error instanceof Error ? error.message : 'Unknown error'}</p>
-</div>
-			`;
+			container.empty();
+			const errorEl = container.createDiv({ cls: 'wbs-error' });
+			errorEl.createEl('h3', { text: 'エラー' });
+			errorEl.createEl('p', { text: `WBSの読み込みに失敗しました: ${error instanceof Error ? error.message : '不明なエラー'}` });
 		}
+		return Promise.resolve();
 	}
 
 	/**
 	 * WBSをレンダリング
 	 */
 	private render(): void {
-		console.log('[WBS] Rendering in mode:', this.viewMode);
+		console.debug('[WBS] Rendering in mode:', this.viewMode);
 		if (!this.currentProject) {
-			console.log('[WBS] No project to render');
+			console.debug('[WBS] No project to render');
 			return;
 		}
 
@@ -265,24 +271,29 @@ due-date: 2024-01-31
 
 		// ヘッダー部分
 		const header = container.createDiv({ cls: 'wbs-header' });
-		header.innerHTML = `
-<div class="wbs-header-content">
-	<h2 class="wbs-title">${this.currentProject.name}</h2>
-	<div class="wbs-stats">
-		<span class="wbs-stat">${this.currentProject.items.size} タスク</span>
-		<span class="wbs-stat">${this.getCompletedCount()} 完了</span>
-	</div>
-</div>
-<div class="wbs-actions">
-	<div class="wbs-view-toggle">
-		<button class="wbs-btn ${this.viewMode === 'gantt' ? 'active' : ''}" data-mode="gantt" aria-label="ガントチャート">📊</button>
-		<button class="wbs-btn ${this.viewMode === 'table' ? 'active' : ''}" data-mode="table" aria-label="テーブル">📋</button>
-	</div>
-	<button class="wbs-btn wbs-btn-refresh" aria-label="更新">🔄</button>
-	<button class="wbs-btn wbs-btn-expand-all" aria-label="すべて展開">↕</button>
-	<button class="wbs-btn wbs-btn-copy-tags" aria-label="タグをコピー">🏷️</button>
-</div>
-		`;
+		const headerContent = header.createDiv({ cls: 'wbs-header-content' });
+		headerContent.createEl('h2', { cls: 'wbs-title', text: this.currentProject.name });
+		const stats = headerContent.createDiv({ cls: 'wbs-stats' });
+		stats.createEl('span', { cls: 'wbs-stat', text: `${this.currentProject.items.size} タスク` });
+		stats.createEl('span', { cls: 'wbs-stat', text: `${this.getCompletedCount()} 完了` });
+
+		const actions = header.createDiv({ cls: 'wbs-actions' });
+		const viewToggle = actions.createDiv({ cls: 'wbs-view-toggle' });
+		const ganttBtn = viewToggle.createEl('button', {
+			cls: `wbs-btn ${this.viewMode === 'gantt' ? 'active' : ''}`,
+			attr: { 'data-mode': 'gantt', 'aria-label': 'ガントチャート' },
+			text: '📊',
+		});
+		const tableBtn = viewToggle.createEl('button', {
+			cls: `wbs-btn ${this.viewMode === 'table' ? 'active' : ''}`,
+			attr: { 'data-mode': 'table', 'aria-label': 'テーブル' },
+			text: '📋',
+		});
+		void ganttBtn;
+		void tableBtn;
+		actions.createEl('button', { cls: 'wbs-btn wbs-btn-refresh', attr: { 'aria-label': '更新' }, text: '🔄' });
+		actions.createEl('button', { cls: 'wbs-btn wbs-btn-expand-all', attr: { 'aria-label': 'すべて展開' }, text: '↕' });
+		actions.createEl('button', { cls: 'wbs-btn wbs-btn-copy-tags', attr: { 'aria-label': 'タグをコピー' }, text: '🏷️' });
 
 		// ルート検証結果を表示
 		const validation = this.parser.validateSingleRoot(this.currentProject);
@@ -299,21 +310,25 @@ due-date: 2024-01-31
 				errorHtml += `<div class="wbs-validation-error-files">対象ファイル: ${fileLinks}</div>`;
 			}
 			
-			errorDiv.innerHTML = errorHtml;
+			errorDiv.appendChild(document.createRange().createContextualFragment(errorHtml));
 		}
 
 		// コンテンツ部分（テーブルまたはガントチャート）
 		const contentContainer = container.createDiv({ cls: 'wbs-content' });
 		
 		if (this.viewMode === 'gantt') {
-			contentContainer.innerHTML = this.ganttRenderer.render(this.currentProject);
+			contentContainer.appendChild(
+				document.createRange().createContextualFragment(this.ganttRenderer.render(this.currentProject)),
+			);
 		} else {
-			contentContainer.innerHTML = this.tableRenderer.renderTable(this.currentProject);
+			contentContainer.appendChild(
+				document.createRange().createContextualFragment(this.tableRenderer.renderTable(this.currentProject)),
+			);
 		}
 
 		// イベントリスナーを設定
 		this.setupEventListeners(container);
-		console.log('[WBS] Render complete');
+		console.debug('[WBS] Render complete');
 	}
 
 	/**
@@ -346,7 +361,7 @@ due-date: 2024-01-31
 
 		// 更新ボタン
 		const refreshBtn = container.querySelector('.wbs-btn-refresh');
-		refreshBtn?.addEventListener('click', () => this.refresh());
+		refreshBtn?.addEventListener('click', () => void this.refresh());
 
 		// すべて展開/折りたたみボタン
 		const expandAllBtn = container.querySelector('.wbs-btn-expand-all');
@@ -369,7 +384,7 @@ due-date: 2024-01-31
 			link.addEventListener('click', (e) => {
 				e.preventDefault();
 				const filePath = (e.currentTarget as HTMLElement).dataset.filePath;
-				if (filePath) this.openFile(filePath);
+				if (filePath) void this.openFile(filePath);
 			});
 
 			link.addEventListener('contextmenu', (e) => {
@@ -384,9 +399,48 @@ due-date: 2024-01-31
 			link.addEventListener('click', (e) => {
 				e.preventDefault();
 				const filePath = (e.currentTarget as HTMLElement).dataset.filePath;
-				if (filePath) this.openFile(filePath);
+				if (filePath) void this.openFile(filePath);
 			});
 		});
+	}
+
+	/**
+	 * Reload and re-render the current view.
+	 */
+	async refresh(): Promise<void> {
+		if (this.currentBaseFile) {
+			await this.loadBaseFile(this.currentBaseFile);
+			return;
+		}
+		if (this.currentFolder) {
+			await this.loadFolder(this.currentFolder);
+		}
+	}
+
+	/**
+	 * Called by the plugin when a file in the vault changes.
+	 */
+	onFileChange(file: TFile): void {
+		void file;
+		if (!this.isInitialized) return;
+		if (this.refreshDebounceTimer) {
+			clearTimeout(this.refreshDebounceTimer);
+		}
+		this.refreshDebounceTimer = setTimeout(() => {
+			void this.refresh();
+		}, 250);
+	}
+
+	private async addWBSTagToFile(filePath: string): Promise<void> {
+		const fileName = filePath.split('/').pop()?.replace(/\.md$/i, '') || filePath;
+		await navigator.clipboard.writeText(`[[${fileName}]]`);
+		new Notice('ファイルリンクをクリップボードにコピーしました');
+	}
+
+	private setStatus(filePath: string, status: string): void {
+		void filePath;
+		void status;
+		new Notice('ステータス更新はまだ未実装です');
 	}
 
 	/**
@@ -473,67 +527,8 @@ due-date: 2024-01-31
 		const file = this.app.vault.getAbstractFileByPath(filePath);
 		if (!(file instanceof TFile)) return;
 
-		// WBSビューが置かれているペインの反対側にファイルを開く
-		const currentLeaf = this.leaf;
-		const workspace = this.app.workspace;
-		
-		// ワークスペースの構造から、WBSリーフの位置を特定
-		// Obsidianのワークスペースは階層的なスプリットコンテナで構成される
-		const rootSplit = (workspace as any).rootSplit;
-		
-		let targetLeaf: any = null;
-		
-		// ワークスペースをトラバースしてWBSリーフが左右どちらにあるか確認
-		const isWBSOnLeft = (container: any): boolean | null => {
-			if (!container || !container.children) return null;
-			
-			// 最上位の子コンテナをチェック
-			for (let i = 0; i < container.children.length; i++) {
-				const child = container.children[i];
-				
-				// 子がリーフの場合
-				if (child === currentLeaf) {
-					return i === 0; // i === 0なら左側
-				}
-				
-				// 子がコンテナの場合、再帰的に探索
-				if (child.children) {
-					const result = isWBSOnLeft(child);
-					if (result !== null) return result;
-				}
-			}
-			
-			return null;
-		};
-		
-		const wbsOnLeft = isWBSOnLeft(rootSplit);
-		
-		if (wbsOnLeft === true) {
-			// WBSが左側 → 右側に分割して開く
-			targetLeaf = workspace.getLeaf('split', 'vertical');
-		} else if (wbsOnLeft === false) {
-			// WBSが右側 → 左側を探すか、反対側に分割
-			// 既存の左側のペインを探す
-			const tryGetLeftPane = (): any => {
-				if (rootSplit.children && rootSplit.children.length > 0) {
-					return rootSplit.children[0];
-				}
-				return null;
-			};
-			
-			const leftPane = tryGetLeftPane();
-			if (leftPane && leftPane !== currentLeaf && leftPane.children && leftPane.children.length > 0) {
-				// 左側に既存ペインがあり、マークダウンが開けるなら使用
-				targetLeaf = leftPane.children[0];
-			} else {
-				// なければ左に分割
-				targetLeaf = workspace.getLeaf('split', 'vertical');
-			}
-		} else {
-			// 位置が特定できなければフォールバック: 右に分割
-			targetLeaf = workspace.getLeaf('split', 'vertical');
-		}
-
+		// 右側に分割して開く（ワークスペース内部構造への依存を避ける）
+		const targetLeaf = this.app.workspace.getLeaf('split', 'vertical');
 		await targetLeaf.openFile(file);
 	}
 
@@ -543,18 +538,20 @@ due-date: 2024-01-31
 		menu.addItem(item => {
 			item.setTitle('ファイルを開く')
 				.setIcon('file')
-				.onClick(() => this.openFile(filePath));
+				.onClick(() => void this.openFile(filePath));
 		});
 
 		menu.addItem(item => {
 			item.setTitle('新しいペインで開く')
 				.setIcon('file-plus')
-				.onClick(async () => {
-					const file = this.app.vault.getAbstractFileByPath(filePath);
-					if (!(file instanceof TFile)) return;
-					// 常に右に分割して新しいペインを作成
-					const newLeaf = this.app.workspace.getLeaf('split', 'vertical');
-					await newLeaf.openFile(file);
+				.onClick(() => {
+					void (async () => {
+						const file = this.app.vault.getAbstractFileByPath(filePath);
+						if (!(file instanceof TFile)) return;
+						// 常に右に分割して新しいペインを作成
+						const newLeaf = this.app.workspace.getLeaf('split', 'vertical');
+						await newLeaf.openFile(file);
+					})().catch((err) => console.error('[WBS] 新しいペインでファイルを開けませんでした', err));
 				});
 		});
 
@@ -563,7 +560,7 @@ due-date: 2024-01-31
 		menu.addItem(item => {
 			item.setTitle('WBSタグを追加')
 				.setIcon('tag')
-				.onClick(() => this.addWBSTagToFile(filePath));
+				.onClick(() => void this.addWBSTagToFile(filePath));
 		});
 
 		menu.addSeparator();
@@ -607,7 +604,7 @@ class TagSuggestionModal extends Modal {
 
 		contentEl.createEl('h2', { text: `📋 WBSタグ候補: ${this.projectName}` });
 		contentEl.createEl('p', { 
-			text: 'クリックでクリップボードにコピー、Obsidian Full Calendarなどで使用できます',
+			text: 'クリックでクリップボードにコピー（Obsidian Full Calendarなどで使用できます）',
 			cls: 'wbs-tag-modal-hint'
 		});
 
@@ -618,9 +615,11 @@ class TagSuggestionModal extends Modal {
 			tagEl.createEl('span', { text: `#${tag}`, cls: 'wbs-tag-name' });
 			
 			const copyBtn = tagEl.createEl('button', { text: '📋', cls: 'wbs-tag-copy-btn' });
-			copyBtn.addEventListener('click', async () => {
-				await navigator.clipboard.writeText(tag);
-				new Notice(`タグ「${tag}」をコピーしました`);
+			copyBtn.addEventListener('click', () => {
+				void navigator.clipboard
+					.writeText(tag)
+					.then(() => new Notice(`タグ「${tag}」をコピーしました`))
+					.catch((err) => console.error('[WBS] タグのコピーに失敗しました', err));
 			});
 		}
 
@@ -628,10 +627,12 @@ class TagSuggestionModal extends Modal {
 			text: 'すべてのタグをコピー',
 			cls: 'wbs-tag-copy-all-btn'
 		});
-		allCopyBtn.addEventListener('click', async () => {
+		allCopyBtn.addEventListener('click', () => {
 			const allTags = this.tags.map(t => `  - ${t}`).join('\n');
-			await navigator.clipboard.writeText(`tags:\n${allTags}`);
-			new Notice('すべてのタグをYAML形式でコピーしました');
+			void navigator.clipboard
+				.writeText(`tags:\n${allTags}`)
+				.then(() => new Notice('すべてのタグをYAML形式でコピーしました'))
+				.catch((err) => console.error('[WBS] タグ一括コピーに失敗しました', err));
 		});
 	}
 

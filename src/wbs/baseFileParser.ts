@@ -83,6 +83,16 @@ export class BaseFileParser {
 	private parseYaml(content: string): Record<string, unknown> {
 		const result: Record<string, unknown> = {};
 		const lines = content.split('\n');
+
+		const peekNextContentLine = (startIndex: number): { indent: number; trimmed: string } | null => {
+			for (let j = startIndex; j < lines.length; j++) {
+				const line = lines[j];
+				const trimmed = line.trim();
+				if (trimmed === '' || trimmed.startsWith('#')) continue;
+				return { indent: line.search(/\S/), trimmed };
+			}
+			return null;
+		};
 		
 		interface StackItem {
 			obj: Record<string, unknown> | unknown[];
@@ -114,7 +124,7 @@ export class BaseFileParser {
 				
 				// 現在のオブジェクトの最後のキーの配列に追加
 				if (!Array.isArray(current.obj) && current.key) {
-					const arr = (current.obj as Record<string, unknown>)[current.key];
+					const arr = current.obj[current.key];
 					if (Array.isArray(arr)) {
 						if (itemContent.includes(':')) {
 							// オブジェクト形式の配列要素
@@ -153,13 +163,23 @@ export class BaseFileParser {
 				const val = trimmed.substring(colonIdx + 1).trim();
 				
 				if (!Array.isArray(current.obj)) {
-					const obj = current.obj as Record<string, unknown>;
-					if (val === '' || val === '[]') {
-						// 空の配列またはネストされたオブジェクト
-						obj[key] = [];
-						stack.push({ obj: obj, indent: indent, key: key });
+					if (val === '') {
+						const next = peekNextContentLine(i + 1);
+						if (next && next.indent > indent && next.trimmed.startsWith('- ')) {
+							// ネストされた配列（次行が "- " で始まる）
+							current.obj[key] = [];
+							stack.push({ obj: current.obj, indent: indent, key: key });
+						} else {
+							// ネストされたオブジェクト
+							const child: Record<string, unknown> = {};
+							current.obj[key] = child;
+							stack.push({ obj: child, indent: indent });
+						}
+					} else if (val === '[]') {
+						// 空配列
+						current.obj[key] = [];
 					} else {
-						obj[key] = val;
+						current.obj[key] = val;
 					}
 				}
 			}
@@ -180,12 +200,15 @@ export class BaseFileParser {
 				return null;
 			}
 			const obj = f as Record<string, unknown>;
-			return {
-				property: String(obj.property || ''),
-				operator: (obj.operator || 'is') as BaseFilter['operator'],
-				value: obj.value
-			};
-		}).filter((f): f is BaseFilter => f !== null && f.property !== '');
+			const property = typeof obj.property === 'string' ? obj.property : '';
+			if (!property) return null;
+			const operator = (obj.operator || 'is') as BaseFilter['operator'];
+			const value = obj.value;
+			if (value === undefined) {
+				return { property, operator };
+			}
+			return { property, operator, value };
+		}).filter((f): f is BaseFilter => f !== null);
 	}
 
 	/**
@@ -202,15 +225,15 @@ export class BaseFileParser {
 			
 			const view: BaseView = {
 				type: (obj.type || 'table') as BaseView['type'],
-				name: String(obj.name || 'View')
+				name: typeof obj.name === 'string' ? obj.name : 'ビュー'
 			};
 
 			if (Array.isArray(obj.order)) {
 				view.order = obj.order.map(String);
 			}
 
-			if (obj.groupBy) {
-				view.groupBy = String(obj.groupBy);
+			if (typeof obj.groupBy === 'string' && obj.groupBy) {
+				view.groupBy = obj.groupBy;
 			}
 
 			if (Array.isArray(obj.sort)) {
@@ -249,28 +272,28 @@ export class BaseFileParser {
 	/**
 	 * Basesのカラム名をWBSカラム名にマッピング
 	 */
-	mapToWBSColumns(baseColumns: string[]): string[] {
-		const columnMap: Record<string, string> = {
+	mapToWBSColumns(baseColumns: string[]): WBSColumn[] {
+		const columnMap: Record<string, WBSColumn> = {
 			'file.name': 'title',
 			'file.path': 'title',
-			'name': 'title',
-			'title': 'title',
-			'status': 'status',
-			'assignee': 'assignee',
+			name: 'title',
+			title: 'title',
+			status: 'status',
+			assignee: 'assignee',
 			'start-date': 'startDate',
-			'startDate': 'startDate',
+			startDate: 'startDate',
 			'due-date': 'dueDate',
-			'dueDate': 'dueDate',
-			'progress': 'progress',
-			'priority': 'priority',
+			dueDate: 'dueDate',
+			progress: 'progress',
+			priority: 'priority',
 			'estimated-hours': 'estimatedHours',
-			'estimatedHours': 'estimatedHours',
+			estimatedHours: 'estimatedHours',
 			'actual-hours': 'actualHours',
-			'actualHours': 'actualHours',
-			'tags': 'tags'
+			actualHours: 'actualHours',
+			tags: 'tags',
 		};
 
-		const result: string[] = ['wbs']; // WBS番号は常に最初
+		const result: WBSColumn[] = ['wbs']; // WBS番号は常に最初
 
 		for (const col of baseColumns) {
 			const mapped = columnMap[col];
@@ -287,3 +310,4 @@ export class BaseFileParser {
 		return result;
 	}
 }
+import type { WBSColumn } from './wbsRenderer';
