@@ -111,6 +111,136 @@ estimated-hours: 8
 - `ブロック中`, `保留` → blocked
 - `キャンセル`, `中止` → cancelled
 
+### Decision Project（意思決定プロジェクト）
+
+意思決定を伴うプロジェクトを統合管理します。選択肢の比較、リスク管理、意思決定ログなど、複雑な判断を整理・追跡できます。
+
+**ユースケース例:**
+- 移転先の検討（複数候補の比較評価）
+- ベンダー/技術選定
+- 投資判断
+- キャリア選択
+
+**使い方:**
+1. ファイルエクスプローラーでフォルダを右クリック → 「Decision Projectとして開く」
+2. プロジェクト設定ノート（`_project.md`など）を作成
+3. 選択肢、リスク、意思決定ログをノートとして追加
+
+**プロジェクト設定ノートの例:**
+```yaml
+---
+nexuspm-type: decision-project
+criteria:
+  - key: cost
+    label: コスト
+    weight: 3
+    direction: lower-is-better
+  - key: quality
+    label: 品質
+    weight: 5
+  - key: accessibility
+    label: アクセス
+    weight: 4
+gates:
+  - id: budget-approval
+    label: 予算承認
+    required: true
+  - id: final-decision
+    label: 最終決定
+---
+# 移転先検討プロジェクト
+
+プロジェクトの概要説明...
+```
+
+**選択肢（Option）ノートの例:**
+```yaml
+---
+nexuspm-type: option
+parent: "[[移転先検討プロジェクト]]"
+status: active
+scores:
+  cost: 4
+  quality: 3
+  accessibility: 5
+pros:
+  - 駅から近い
+  - 周辺施設が充実
+cons:
+  - 家賃が高い
+---
+# 候補A：渋谷
+
+詳細な説明...
+```
+
+**意思決定ログ（Decision）ノートの例:**
+```yaml
+---
+nexuspm-type: decision
+parent: "[[移転先検討プロジェクト]]"
+status: approved
+date: 2024-06-15
+gate: budget-approval
+stakeholders:
+  - 山田
+  - 鈴木
+rationale: "コストと品質のバランスが最も良い"
+---
+# 予算承認：候補Aを採用
+
+決定の詳細な背景...
+```
+
+**リスク（Risk）ノートの例:**
+```yaml
+---
+nexuspm-type: risk
+parent: "[[移転先検討プロジェクト]]"
+status: active
+probability: 3
+impact: 4
+mitigation: "事前に現地調査を実施"
+owner: 田中
+---
+# リスク：契約条件の変更
+
+リスクの詳細説明...
+```
+
+**ノートタイプ一覧:**
+| `nexuspm-type` | 説明 |
+|---------------|------|
+| `decision-project` | プロジェクト設定（評価基準、ゲートを定義） |
+| `option` | 選択肢・候補 |
+| `decision` | 意思決定ログ |
+| `risk` | リスク |
+| `assumption` | 仮説・前提条件 |
+| `evidence` | 根拠・エビデンス |
+
+**評価基準（Criteria）のプロパティ:**
+| プロパティ | 説明 | 例 |
+|-----------|------|-----|
+| `key` | 一意の識別子 | `cost` |
+| `label` | 表示名 | `コスト` |
+| `weight` | 重み（1-10） | `5` |
+| `direction` | 評価方向 | `lower-is-better`（デフォルト: higher-is-better） |
+
+**リスクのプロパティ:**
+| プロパティ | 説明 | 値の範囲 |
+|-----------|------|---------|
+| `probability` | 発生確率 | 1-5 |
+| `impact` | 影響度 | 1-5 |
+| `status` | ステータス | `active`, `mitigated`, `accepted`, `closed` |
+| `mitigation` | 軽減策 | 自由テキスト |
+| `owner` | 担当者 | 担当者名 |
+
+**スコアリング（MCDA）:**
+- 各選択肢のスコアは重み付き合計で計算
+- `direction: lower-is-better`の基準は反転処理
+- 未入力のスコアは0として扱う
+- リスク露出度 = 発生確率 × 影響度
+
 ### グラフビューH1見出し表示
 
 グラフビューのノードラベルを、ファイル名ではなく**ファイル内の最初のH1見出し**で表示します。
@@ -165,9 +295,23 @@ describe('MyFeature', () => {
 ```
 plugin/
 ├── src/                    # ビジネスロジック（テスト可能）
-│   └── graphLabelManager.ts
+│   ├── graphLabelManager.ts
+│   ├── wbs/                # WBSビュー機能
+│   │   ├── wbsDataModel.ts
+│   │   ├── wbsParser.ts
+│   │   ├── wbsRenderer.ts
+│   │   └── wbsView.ts
+│   └── decision/           # Decision Project機能
+│       ├── decisionDataModel.ts
+│       ├── decisionParser.ts
+│       ├── decisionRenderer.ts
+│       ├── decisionView.ts
+│       ├── scoring.ts
+│       └── riskModel.ts
 ├── tests/                  # Jestテスト
-│   └── graphLabelManager.test.ts
+│   ├── graphLabelManager.test.ts
+│   ├── wbs/
+│   └── decision/
 ├── main.ts                 # プラグインエントリーポイント
 ├── manifest.json           # プラグインメタデータ
 └── jest.config.js          # Jestテスト設定

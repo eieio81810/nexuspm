@@ -3,11 +3,13 @@
 import { App, Plugin, PluginSettingTab, Setting, Notice, TFile, TFolder, WorkspaceLeaf, Menu, MenuItem, TAbstractFile } from 'obsidian';
 import { GraphLabelManager } from './src/graphLabelManager.js';
 import { WBSView, WBS_VIEW_TYPE } from './src/wbs/wbsView.js';
+import { DecisionView, DECISION_VIEW_TYPE } from './src/decision/decisionView.js';
 
 interface HadocommunPluginSettings {
 	greeting: string;
 	useH1ForGraphNodes: boolean;
 	wbsEnabled: boolean;
+	decisionEnabled: boolean;
 }
 
 interface GraphRenderer {
@@ -43,7 +45,8 @@ interface RenderableNode {
 const DEFAULT_SETTINGS: HadocommunPluginSettings = {
 	greeting: 'ハドこみゅへようこそ！ 🌈',
 	useH1ForGraphNodes: false,
-	wbsEnabled: true
+	wbsEnabled: true,
+	decisionEnabled: true
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -70,6 +73,12 @@ export default class HadocommunPlugin extends Plugin {
 			(leaf) => new WBSView(leaf)
 		);
 
+		// Decision View を登録
+		this.registerView(
+			DECISION_VIEW_TYPE,
+			(leaf) => new DecisionView(leaf)
+		);
+
 		const ribbonIconEl = this.addRibbonIcon('dice', 'Hadocommun', (evt: MouseEvent) => {
 			void evt;
 			new Notice(this.settings.greeting);
@@ -82,6 +91,14 @@ export default class HadocommunPlugin extends Plugin {
 				void this.activateWBSView().catch((err) => console.error('[Hadocommun] WBSビューの起動に失敗しました', err));
 			});
 			wbsRibbonEl.addClass('wbs-ribbon-class');
+		}
+
+		// Decision リボンアイコンを追加
+		if (this.settings.decisionEnabled) {
+			const decisionRibbonEl = this.addRibbonIcon('scale', 'Decision Viewを開く', () => {
+				void this.activateDecisionView().catch((err: Error) => console.error('[Hadocommun] Decision Viewの起動に失敗しました', err));
+			});
+			decisionRibbonEl.addClass('decision-ribbon-class');
 		}
 
 		this.addCommand({
@@ -143,6 +160,31 @@ export default class HadocommunPlugin extends Plugin {
 			}
 		});
 
+		// Decision コマンドを追加
+		this.addCommand({
+			id: 'open-decision-view',
+			name: 'Decision Viewを開く',
+			callback: () => {
+				void this.activateDecisionView().catch((err: Error) => console.error('[Hadocommun] Decision Viewの起動に失敗しました', err));
+			}
+		});
+
+		this.addCommand({
+			id: 'open-folder-as-decision',
+			name: '現在のフォルダをDecision Projectとして開く',
+			checkCallback: (checking: boolean) => {
+				const activeFile = this.app.workspace.getActiveFile();
+				if (activeFile) {
+					if (!checking) {
+						const folderPath = activeFile.parent?.path || '';
+						void this.openFolderAsDecision(folderPath).catch((err: Error) => console.error('[Hadocommun] フォルダをDecision Projectとして開けませんでした', err));
+					}
+					return true;
+				}
+				return false;
+			}
+		});
+
 		this.addSettingTab(new HadocommunSettingTab(this.app, this));
 
 		// ファイルエクスプローラーのコンテキストメニューを拡張
@@ -154,7 +196,15 @@ export default class HadocommunPlugin extends Plugin {
 						item.setTitle('WBSとして開く')
 							.setIcon('layout-list')
 							.onClick(() => {
-								void this.openFolderAsWBS(file.path).catch((err) => console.error('[Hadocommun] フォルダをWBSとして開けませんでした', err));
+								void this.openFolderAsWBS(file.path).catch((err: Error) => console.error('[Hadocommun] フォルダをWBSとして開けませんでした', err));
+							});
+					});
+
+					menu.addItem((item: MenuItem) => {
+						item.setTitle('Decision Projectとして開く')
+							.setIcon('scale')
+							.onClick(() => {
+								void this.openFolderAsDecision(file.path).catch((err: Error) => console.error('[Hadocommun] フォルダをDecision Projectとして開けませんでした', err));
 							});
 					});
 				}
@@ -165,7 +215,7 @@ export default class HadocommunPlugin extends Plugin {
 						item.setTitle('WBSとして開く')
 							.setIcon('layout-list')
 							.onClick(() => {
-								void this.openBaseFileAsWBS(file.path).catch((err) => console.error('[Hadocommun] .baseファイルをWBSとして開けませんでした', err));
+								void this.openBaseFileAsWBS(file.path).catch((err: Error) => console.error('[Hadocommun] .baseファイルをWBSとして開けませんでした', err));
 							});
 					});
 				}
@@ -196,6 +246,8 @@ export default class HadocommunPlugin extends Plugin {
 					}
 					// WBS Viewに変更を通知
 					this.notifyWBSViews(file);
+					// Decision Viewに変更を通知
+					this.notifyDecisionViews(file);
 				}
 			})
 		);
@@ -213,6 +265,7 @@ export default class HadocommunPlugin extends Plugin {
 			this.app.vault.on('create', (file: TAbstractFile) => {
 				if (file instanceof TFile) {
 					this.notifyWBSViews(file);
+					this.notifyDecisionViews(file);
 				}
 			})
 		);
@@ -221,6 +274,7 @@ export default class HadocommunPlugin extends Plugin {
 			this.app.vault.on('delete', (file: TAbstractFile) => {
 				if (file instanceof TFile) {
 					this.refreshAllWBSViews();
+					this.refreshAllDecisionViews();
 				}
 			})
 		);
@@ -248,6 +302,10 @@ export default class HadocommunPlugin extends Plugin {
 				typeof persisted.wbsEnabled === 'boolean'
 					? persisted.wbsEnabled
 					: DEFAULT_SETTINGS.wbsEnabled,
+			decisionEnabled:
+				typeof persisted.decisionEnabled === 'boolean'
+					? persisted.decisionEnabled
+					: DEFAULT_SETTINGS.decisionEnabled,
 		};
 	}
 
@@ -487,6 +545,77 @@ export default class HadocommunPlugin extends Plugin {
 			}
 		}
 	}
+
+	/**
+	 * すべてのDecision Viewに変更を通知
+	 */
+	private notifyDecisionViews(file: TFile): void {
+		const leaves = this.app.workspace.getLeavesOfType(DECISION_VIEW_TYPE);
+		for (const leaf of leaves) {
+			const view = leaf.view as unknown as { onFileChange?: (file: TFile) => void };
+			if (view && typeof view.onFileChange === 'function') {
+				view.onFileChange(file);
+			}
+		}
+	}
+
+	/**
+	 * すべてのDecision Viewを更新
+	 */
+	private refreshAllDecisionViews(): void {
+		const leaves = this.app.workspace.getLeavesOfType(DECISION_VIEW_TYPE);
+		for (const leaf of leaves) {
+			const view = leaf.view as unknown as { refresh?: () => void };
+			if (view && typeof view.refresh === 'function') {
+				view.refresh();
+			}
+		}
+	}
+
+	/**
+	 * Decision Viewをアクティブにする（タブとして開く）
+	 */
+	async activateDecisionView(): Promise<WorkspaceLeaf> {
+		const { workspace } = this.app;
+
+		// 既存のDecisionビューを探す
+		let leaf = workspace.getLeavesOfType(DECISION_VIEW_TYPE)[0];
+
+		if (!leaf) {
+			// 新しいタブとして開く
+			leaf = workspace.getLeaf('tab');
+			await leaf.setViewState({ type: DECISION_VIEW_TYPE, active: true });
+		}
+
+		await workspace.revealLeaf(leaf);
+		return leaf;
+	}
+
+	/**
+	 * フォルダをDecision Projectとして開く
+	 */
+	async openFolderAsDecision(folderPath: string): Promise<void> {
+		console.debug('[Decision] Opening folder as Decision Project:', folderPath);
+		
+		// 既存のDecisionビューを探すか、新しいタブを作成
+		let leaf = this.app.workspace.getLeavesOfType(DECISION_VIEW_TYPE)[0];
+		
+		if (!leaf) {
+			leaf = this.app.workspace.getLeaf('tab');
+			await leaf.setViewState({ 
+				type: DECISION_VIEW_TYPE, 
+				active: true,
+				state: { folder: folderPath }
+			});
+		} else {
+			// 既存のビューにフォルダをロード
+			await this.app.workspace.revealLeaf(leaf);
+			const view = leaf.view as DecisionView;
+			if (view && typeof view.loadFolder === 'function') {
+				await view.loadFolder(folderPath);
+			}
+		}
+	}
 }
 
 class HadocommunSettingTab extends PluginSettingTab {
@@ -549,7 +678,7 @@ class HadocommunSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
-			// WBS使用方法のヘルプ
+		// WBS使用方法のヘルプ
 			const wbsHelp = containerEl.createDiv({ cls: 'setting-item' });
 			wbsHelp.appendChild(document.createRange().createContextualFragment(`
 <div class="setting-item-info">
@@ -570,5 +699,42 @@ class HadocommunSettingTab extends PluginSettingTab {
 	</div>
 </div>
 			`));
+
+		new Setting(containerEl)
+			.setName('Decision Project')
+			.setHeading();
+
+		new Setting(containerEl)
+			.setName('Decision Projectを有効化')
+			.setDesc('意思決定を伴うプロジェクトを統合管理します（選択肢比較、リスク管理、意思決定ログ）')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.decisionEnabled)
+				.onChange(async (value: boolean) => {
+					this.plugin.settings.decisionEnabled = value;
+					await this.plugin.saveSettings();
+				}));
+
+		// Decision使用方法のヘルプ
+		const decisionHelp = containerEl.createDiv({ cls: 'setting-item' });
+		decisionHelp.appendChild(document.createRange().createContextualFragment(`
+<div class="setting-item-info">
+	<div class="setting-item-name">Decision Projectの使い方</div>
+	<div class="setting-item-description">
+		<ol style="margin: 0.5em 0; padding-left: 1.5em;">
+			<li>フォルダを右クリック → 「Decision Projectとして開く」</li>
+			<li>プロジェクト設定ノート（<code>nexuspm-type: decision-project</code>）を作成</li>
+			<li>以下のノートタイプをフロントマターで指定:
+				<ul style="margin-top: 0.5em;">
+					<li><code>nexuspm-type: option</code> - 選択肢（候補）</li>
+					<li><code>nexuspm-type: decision</code> - 意思決定ログ</li>
+					<li><code>nexuspm-type: risk</code> - リスク</li>
+					<li><code>nexuspm-type: assumption</code> - 仮説・前提</li>
+					<li><code>nexuspm-type: evidence</code> - 根拠・エビデンス</li>
+				</ul>
+			</li>
+		</ol>
+	</div>
+</div>
+		`));
 		}
 }
