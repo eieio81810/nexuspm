@@ -4,12 +4,19 @@ import { App, Plugin, PluginSettingTab, Setting, Notice, TFile, TFolder, Workspa
 import { GraphLabelManager } from './src/graphLabelManager.js';
 import { WBSView, WBS_VIEW_TYPE } from './src/wbs/wbsView.js';
 import { DecisionView, DECISION_VIEW_TYPE } from './src/decision/decisionView.js';
+import { DECISION_TEMPLATES, getTemplateContent } from './src/decision/decisionTemplates.js';
+import type { DecisionItemType } from './src/decision/decisionDataModel.js';
+import { ProjectConfigManager, ProjectType } from './src/projectConfig.js';
+import { AIAgentView, AI_AGENT_VIEW_TYPE, activateAIAgentView } from './src/ai/aiAgentView.js';
+import { AIAgentSettings, DEFAULT_AI_AGENT_SETTINGS, LLMProvider } from './src/ai/aiAgentDataModel.js';
 
 interface HadocommunPluginSettings {
 	greeting: string;
 	useH1ForGraphNodes: boolean;
 	wbsEnabled: boolean;
 	decisionEnabled: boolean;
+	aiAgentEnabled: boolean;
+	aiAgentSettings: AIAgentSettings;
 }
 
 interface GraphRenderer {
@@ -46,7 +53,9 @@ const DEFAULT_SETTINGS: HadocommunPluginSettings = {
 	greeting: 'ハドこみゅへようこそ！ 🌈',
 	useH1ForGraphNodes: false,
 	wbsEnabled: true,
-	decisionEnabled: true
+	decisionEnabled: true,
+	aiAgentEnabled: true,
+	aiAgentSettings: DEFAULT_AI_AGENT_SETTINGS
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -59,6 +68,7 @@ export default class HadocommunPlugin extends Plugin {
 	private originalLabels: Map<string, string> = new Map();
 	public overlayLabels: Map<string, unknown> = new Map();
 	private labelManager: GraphLabelManager;
+	private projectConfigManager: ProjectConfigManager;
 
 	async onload() {
 		await this.loadSettings();
@@ -66,6 +76,7 @@ export default class HadocommunPlugin extends Plugin {
 		(window as { hadocommunPlugin?: HadocommunPlugin }).hadocommunPlugin = this;
 
 		this.labelManager = new GraphLabelManager(this.app.metadataCache, this.app.vault);
+		this.projectConfigManager = new ProjectConfigManager(this.app);
 
 		// WBS View を登録
 		this.registerView(
@@ -77,6 +88,12 @@ export default class HadocommunPlugin extends Plugin {
 		this.registerView(
 			DECISION_VIEW_TYPE,
 			(leaf) => new DecisionView(leaf)
+		);
+
+		// AI Agent View を登録
+		this.registerView(
+			AI_AGENT_VIEW_TYPE,
+			(leaf) => new AIAgentView(leaf, this.settings.aiAgentSettings)
 		);
 
 		const ribbonIconEl = this.addRibbonIcon('dice', 'Hadocommun', (evt: MouseEvent) => {
@@ -99,6 +116,14 @@ export default class HadocommunPlugin extends Plugin {
 				void this.activateDecisionView().catch((err: Error) => console.error('[Hadocommun] Decision Viewの起動に失敗しました', err));
 			});
 			decisionRibbonEl.addClass('decision-ribbon-class');
+		}
+
+		// AI Agent リボンアイコンを追加
+		if (this.settings.aiAgentEnabled) {
+			const aiRibbonEl = this.addRibbonIcon('bot', 'AI Agentを開く', () => {
+				void this.activateAIAgentView().catch((err: Error) => console.error('[Hadocommun] AI Agentの起動に失敗しました', err));
+			});
+			aiRibbonEl.addClass('ai-agent-ribbon-class');
 		}
 
 		this.addCommand({
@@ -185,6 +210,15 @@ export default class HadocommunPlugin extends Plugin {
 			}
 		});
 
+		// AI Agent コマンドを追加
+		this.addCommand({
+			id: 'open-ai-agent',
+			name: 'AI Agentを開く',
+			callback: () => {
+				void this.activateAIAgentView().catch((err: Error) => console.error('[Hadocommun] AI Agentの起動に失敗しました', err));
+			}
+		});
+
 		this.addSettingTab(new HadocommunSettingTab(this.app, this));
 
 		// ファイルエクスプローラーのコンテキストメニューを拡張
@@ -192,11 +226,24 @@ export default class HadocommunPlugin extends Plugin {
 			this.app.workspace.on('file-menu', (menu: Menu, file: TAbstractFile) => {
 				// フォルダの場合
 				if (file instanceof TFolder) {
+					// スマートオープン（自動判別）
+					menu.addItem((item: MenuItem) => {
+						item.setTitle('プロジェクトを開く')
+							.setIcon('folder-open')
+							.onClick(() => {
+								void this.smartOpenFolder(file.path).catch((err: Error) => 
+									console.error('[Hadocommun] フォルダを開けませんでした', err));
+							});
+					});
+
+					menu.addSeparator();
+
 					menu.addItem((item: MenuItem) => {
 						item.setTitle('WBSとして開く')
 							.setIcon('layout-list')
 							.onClick(() => {
-								void this.openFolderAsWBS(file.path).catch((err: Error) => console.error('[Hadocommun] フォルダをWBSとして開けませんでした', err));
+								void this.openFolderAsWBS(file.path, true).catch((err: Error) => 
+									console.error('[Hadocommun] フォルダをWBSとして開けませんでした', err));
 							});
 					});
 
@@ -204,9 +251,32 @@ export default class HadocommunPlugin extends Plugin {
 						item.setTitle('Decision Projectとして開く')
 							.setIcon('scale')
 							.onClick(() => {
-								void this.openFolderAsDecision(file.path).catch((err: Error) => console.error('[Hadocommun] フォルダをDecision Projectとして開けませんでした', err));
+								void this.openFolderAsDecision(file.path, true).catch((err: Error) => 
+									console.error('[Hadocommun] フォルダをDecision Projectとして開けませんでした', err));
 							});
 					});
+
+					// Decisionノート作成サブメニュー
+					if (this.settings.decisionEnabled) {
+						menu.addSeparator();
+						
+						// プロジェクト設定ノートが存在するか確認
+						const projectConfigPath = this.findDecisionProjectConfig(file.path);
+						const projectName = projectConfigPath 
+							? this.getFileBasename(projectConfigPath)
+							: null;
+
+						for (const template of DECISION_TEMPLATES) {
+							menu.addItem((item: MenuItem) => {
+								item.setTitle(`Decision: ${template.label}を作成`)
+									.setIcon(template.icon)
+									.onClick(() => {
+										void this.createDecisionNote(file.path, template.type, projectName)
+											.catch((err: Error) => console.error('[Hadocommun] Decisionノートの作成に失敗しました', err));
+									});
+							});
+						}
+					}
 				}
 				
 				// .baseファイルの場合
@@ -306,6 +376,14 @@ export default class HadocommunPlugin extends Plugin {
 				typeof persisted.decisionEnabled === 'boolean'
 					? persisted.decisionEnabled
 					: DEFAULT_SETTINGS.decisionEnabled,
+			aiAgentEnabled:
+				typeof persisted.aiAgentEnabled === 'boolean'
+					? persisted.aiAgentEnabled
+					: DEFAULT_SETTINGS.aiAgentEnabled,
+			aiAgentSettings:
+				isRecord(persisted.aiAgentSettings)
+					? { ...DEFAULT_AI_AGENT_SETTINGS, ...(persisted.aiAgentSettings as unknown as Partial<AIAgentSettings>) }
+					: DEFAULT_SETTINGS.aiAgentSettings,
 		};
 	}
 
@@ -498,9 +576,16 @@ export default class HadocommunPlugin extends Plugin {
 
 	/**
 	 * フォルダをWBSとして開く
+	 * @param folderPath フォルダパス
+	 * @param saveConfig .nexuspmに設定を保存するか
 	 */
-	async openFolderAsWBS(folderPath: string): Promise<void> {
+	async openFolderAsWBS(folderPath: string, saveConfig: boolean = false): Promise<void> {
 		console.debug('[WBS] Opening folder as WBS:', folderPath);
+		
+		// .nexuspmに設定を保存
+		if (saveConfig) {
+			await this.projectConfigManager.initializeProject(folderPath, 'wbs');
+		}
 		
 		// 既存のWBSビューを探すか、新しいタブを作成
 		let leaf = this.app.workspace.getLeavesOfType(WBS_VIEW_TYPE)[0];
@@ -592,10 +677,53 @@ export default class HadocommunPlugin extends Plugin {
 	}
 
 	/**
-	 * フォルダをDecision Projectとして開く
+	 * AI Agent Viewをアクティブにする（サイドパネルとして開く）
 	 */
-	async openFolderAsDecision(folderPath: string): Promise<void> {
+	async activateAIAgentView(targetFolder?: string): Promise<AIAgentView> {
+		const { workspace } = this.app;
+
+		// 既存のAI Agentビューを探す
+		let leaf = workspace.getLeavesOfType(AI_AGENT_VIEW_TYPE)[0];
+
+		if (!leaf) {
+			// 右サイドバーに開く
+			const rightLeaf = workspace.getRightLeaf(false);
+			if (rightLeaf) {
+				leaf = rightLeaf;
+				await leaf.setViewState({
+					type: AI_AGENT_VIEW_TYPE,
+					active: true
+				});
+			}
+		}
+
+		if (leaf) {
+			workspace.revealLeaf(leaf);
+			const view = leaf.view as AIAgentView;
+			
+			// ターゲットフォルダを設定
+			if (targetFolder && view) {
+				view.setTargetFolder(targetFolder);
+			}
+			
+			return view;
+		}
+
+		throw new Error('AI Agent Viewを開けませんでした');
+	}
+
+	/**
+	 * フォルダをDecision Projectとして開く
+	 * @param folderPath フォルダパス
+	 * @param saveConfig .nexuspmに設定を保存するか
+	 */
+	async openFolderAsDecision(folderPath: string, saveConfig: boolean = false): Promise<void> {
 		console.debug('[Decision] Opening folder as Decision Project:', folderPath);
+		
+		// .nexuspmに設定を保存
+		if (saveConfig) {
+			await this.projectConfigManager.initializeProject(folderPath, 'decision');
+		}
 		
 		// 既存のDecisionビューを探すか、新しいタブを作成
 		let leaf = this.app.workspace.getLeavesOfType(DECISION_VIEW_TYPE)[0];
@@ -614,6 +742,118 @@ export default class HadocommunPlugin extends Plugin {
 			if (view && typeof view.loadFolder === 'function') {
 				await view.loadFolder(folderPath);
 			}
+		}
+	}
+
+	/**
+	 * フォルダ内のDecision Project設定ノートを検索
+	 */
+	private findDecisionProjectConfig(folderPath: string): string | null {
+		const folder = this.app.vault.getAbstractFileByPath(folderPath);
+		if (!(folder instanceof TFolder)) return null;
+
+		// _project.md を優先的に探す
+		for (const child of folder.children) {
+			if (child instanceof TFile && child.extension === 'md') {
+				if (child.basename.startsWith('_project')) {
+					const cache = this.app.metadataCache.getFileCache(child);
+					const frontmatter = cache?.frontmatter;
+					if (frontmatter?.['nexuspm-type'] === 'decision-project') {
+						return child.path;
+					}
+				}
+			}
+		}
+
+		// 他のファイルも探す
+		for (const child of folder.children) {
+			if (child instanceof TFile && child.extension === 'md') {
+				const cache = this.app.metadataCache.getFileCache(child);
+				const frontmatter = cache?.frontmatter;
+				if (frontmatter?.['nexuspm-type'] === 'decision-project') {
+					return child.path;
+				}
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * フォルダをスマートに開く（プロジェクトタイプを自動判別）
+	 */
+	async smartOpenFolder(folderPath: string): Promise<void> {
+		console.debug('[Hadocommun] Smart opening folder:', folderPath);
+		
+		const projectType = await this.projectConfigManager.detectProjectType(folderPath);
+		
+		switch (projectType) {
+			case 'wbs':
+				await this.openFolderAsWBS(folderPath);
+				break;
+			case 'decision':
+				await this.openFolderAsDecision(folderPath);
+				break;
+			case 'unknown':
+			default:
+				// タイプが不明な場合はユーザーに選択させる
+				new Notice('プロジェクトタイプを判別できませんでした。「WBSとして開く」または「Decision Projectとして開く」を選択してください。');
+				break;
+		}
+	}
+
+	/**
+	 * ファイルパスからベース名を取得
+	 */
+	private getFileBasename(filePath: string): string {
+		const file = this.app.vault.getAbstractFileByPath(filePath);
+		if (file instanceof TFile) {
+			return file.basename;
+		}
+		// ファイルがない場合はパスから推測
+		const parts = filePath.split('/');
+		const fileName = parts[parts.length - 1];
+		return fileName.replace(/\.md$/, '');
+	}
+
+	/**
+	 * Decisionノートを作成
+	 */
+	async createDecisionNote(folderPath: string, noteType: DecisionItemType, projectName: string | null): Promise<void> {
+		console.debug('[Decision] Creating note:', { folderPath, noteType, projectName });
+
+		const template = DECISION_TEMPLATES.find(t => t.type === noteType);
+		if (!template) {
+			new Notice('テンプレートが見つかりません');
+			return;
+		}
+
+		// ユニークなファイル名を生成
+		let fileName = template.defaultFileName;
+		let filePath = `${folderPath}/${fileName}.md`;
+		let counter = 1;
+
+		while (this.app.vault.getAbstractFileByPath(filePath)) {
+			fileName = `${template.defaultFileName}${counter}`;
+			filePath = `${folderPath}/${fileName}.md`;
+			counter++;
+		}
+
+		// テンプレート内容を生成
+		const content = getTemplateContent(noteType, fileName, projectName || undefined);
+
+		try {
+			// ファイルを作成
+			const newFile = await this.app.vault.create(filePath, content);
+			
+			// 作成したファイルを開く
+			const leaf = this.app.workspace.getLeaf('tab');
+			await leaf.openFile(newFile);
+			
+			new Notice(`${template.label}ノートを作成しました: ${fileName}`);
+		} catch (error) {
+			console.error('[Decision] Failed to create note:', error);
+			new Notice('ノートの作成に失敗しました');
 		}
 	}
 }
@@ -732,6 +972,155 @@ class HadocommunSettingTab extends PluginSettingTab {
 					<li><code>nexuspm-type: evidence</code> - 根拠・エビデンス</li>
 				</ul>
 			</li>
+		</ol>
+	</div>
+</div>
+		`));
+
+		// AI Agent設定セクション
+		new Setting(containerEl)
+			.setName('AI Agent')
+			.setHeading();
+
+		new Setting(containerEl)
+			.setName('AI Agentを有効化')
+			.setDesc('Decision Projectの整理をAIがサポートします（メモの分析、タイプ昇格の提案など）')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.aiAgentEnabled)
+				.onChange(async (value: boolean) => {
+					this.plugin.settings.aiAgentEnabled = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('LLMプロバイダー')
+			.setDesc('使用するAIプロバイダーを選択')
+			.addDropdown(dropdown => dropdown
+				.addOption('openai', 'OpenAI')
+				.addOption('anthropic', 'Anthropic')
+				.addOption('ollama', 'Ollama (ローカル)')
+				.setValue(this.plugin.settings.aiAgentSettings.provider)
+				.onChange(async (value: string) => {
+					this.plugin.settings.aiAgentSettings.provider = value as LLMProvider;
+					await this.plugin.saveSettings();
+					this.display(); // 設定画面を更新
+				}));
+
+		// OpenAI設定
+		if (this.plugin.settings.aiAgentSettings.provider === 'openai') {
+			new Setting(containerEl)
+				.setName('OpenAI API Key')
+				.setDesc('OpenAIのAPIキーを入力')
+				.addText(text => text
+					.setPlaceholder('sk-...')
+					.setValue(this.plugin.settings.aiAgentSettings.openaiApiKey || '')
+					.onChange(async (value: string) => {
+						this.plugin.settings.aiAgentSettings.openaiApiKey = value;
+						await this.plugin.saveSettings();
+					}));
+
+			new Setting(containerEl)
+				.setName('OpenAIモデル')
+				.setDesc('使用するモデルを指定')
+				.addText(text => text
+					.setPlaceholder('gpt-4o')
+					.setValue(this.plugin.settings.aiAgentSettings.openaiModel || 'gpt-4o')
+					.onChange(async (value: string) => {
+						this.plugin.settings.aiAgentSettings.openaiModel = value;
+						await this.plugin.saveSettings();
+					}));
+		}
+
+		// Anthropic設定
+		if (this.plugin.settings.aiAgentSettings.provider === 'anthropic') {
+			new Setting(containerEl)
+				.setName('Anthropic API Key')
+				.setDesc('AnthropicのAPIキーを入力')
+				.addText(text => text
+					.setPlaceholder('sk-ant-...')
+					.setValue(this.plugin.settings.aiAgentSettings.anthropicApiKey || '')
+					.onChange(async (value: string) => {
+						this.plugin.settings.aiAgentSettings.anthropicApiKey = value;
+						await this.plugin.saveSettings();
+					}));
+
+			new Setting(containerEl)
+				.setName('Anthropicモデル')
+				.setDesc('使用するモデルを指定')
+				.addText(text => text
+					.setPlaceholder('claude-sonnet-4-20250514')
+					.setValue(this.plugin.settings.aiAgentSettings.anthropicModel || 'claude-sonnet-4-20250514')
+					.onChange(async (value: string) => {
+						this.plugin.settings.aiAgentSettings.anthropicModel = value;
+						await this.plugin.saveSettings();
+					}));
+		}
+
+		// Ollama設定
+		if (this.plugin.settings.aiAgentSettings.provider === 'ollama') {
+			new Setting(containerEl)
+				.setName('OllamaベースURL')
+				.setDesc('OllamaサーバーのURL')
+				.addText(text => text
+					.setPlaceholder('http://localhost:11434')
+					.setValue(this.plugin.settings.aiAgentSettings.ollamaBaseUrl || 'http://localhost:11434')
+					.onChange(async (value: string) => {
+						this.plugin.settings.aiAgentSettings.ollamaBaseUrl = value;
+						await this.plugin.saveSettings();
+					}));
+
+			new Setting(containerEl)
+				.setName('Ollamaモデル')
+				.setDesc('使用するモデルを指定')
+				.addText(text => text
+					.setPlaceholder('llama3.2')
+					.setValue(this.plugin.settings.aiAgentSettings.ollamaModel || 'llama3.2')
+					.onChange(async (value: string) => {
+						this.plugin.settings.aiAgentSettings.ollamaModel = value;
+						await this.plugin.saveSettings();
+					}));
+		}
+
+		// 共通AI設定
+		new Setting(containerEl)
+			.setName('最大トークン数')
+			.setDesc('AIの応答の最大トークン数')
+			.addText(text => text
+				.setPlaceholder('4096')
+				.setValue(String(this.plugin.settings.aiAgentSettings.maxTokens || 4096))
+				.onChange(async (value: string) => {
+					const num = parseInt(value, 10);
+					if (!isNaN(num) && num > 0) {
+						this.plugin.settings.aiAgentSettings.maxTokens = num;
+						await this.plugin.saveSettings();
+					}
+				}));
+
+		new Setting(containerEl)
+			.setName('Temperature')
+			.setDesc('AIの応答のランダム性（0.0-1.0）')
+			.addText(text => text
+				.setPlaceholder('0.7')
+				.setValue(String(this.plugin.settings.aiAgentSettings.temperature || 0.7))
+				.onChange(async (value: string) => {
+					const num = parseFloat(value);
+					if (!isNaN(num) && num >= 0 && num <= 1) {
+						this.plugin.settings.aiAgentSettings.temperature = num;
+						await this.plugin.saveSettings();
+					}
+				}));
+
+		// AI Agent使用方法のヘルプ
+		const aiHelp = containerEl.createDiv({ cls: 'setting-item' });
+		aiHelp.appendChild(document.createRange().createContextualFragment(`
+<div class="setting-item-info">
+	<div class="setting-item-name">AI Agentの使い方</div>
+	<div class="setting-item-description">
+		<ol style="margin: 0.5em 0; padding-left: 1.5em;">
+			<li>上記でLLMプロバイダーとAPIキーを設定</li>
+			<li>リボンの「AI Agent」アイコンをクリック、または コマンドパレットから「AI Agentを開く」</li>
+			<li>対象フォルダを選択し、メッセージを入力</li>
+			<li>AIがメモを分析し、選択肢やリスクへの昇格を提案します</li>
 		</ol>
 	</div>
 </div>

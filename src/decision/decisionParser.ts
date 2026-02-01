@@ -12,6 +12,7 @@ import {
 	Risk,
 	Assumption,
 	Evidence,
+	Memo,
 	DecisionProject,
 	Criterion,
 	Gate,
@@ -22,6 +23,7 @@ import {
 	createDefaultRisk,
 	createDefaultAssumption,
 	createDefaultEvidence,
+	createDefaultMemo,
 	createEmptyProject,
 	normalizeDecisionStatus,
 	normalizeAssumptionStatus,
@@ -50,6 +52,7 @@ export class DecisionParser {
 		const normalized = typeValue.toLowerCase().trim();
 		const validTypes: DecisionItemType[] = [
 			'decision-project',
+			'memo',
 			'option',
 			'decision',
 			'risk',
@@ -399,6 +402,50 @@ export class DecisionParser {
 	}
 
 	/**
+	 * Memoをパース
+	 */
+	parseMemo(file: TFile): Memo | null {
+		const cache = this.metadataCache.getFileCache(file);
+		const frontmatter = cache?.frontmatter as FrontmatterData | undefined;
+
+		const memo = createDefaultMemo(file.path, file.basename);
+
+		// タイトル
+		const h1Heading = cache?.headings?.find(h => h.level === 1);
+		if (h1Heading) {
+			memo.title = h1Heading.heading;
+		}
+
+		if (!frontmatter) {
+			return memo;
+		}
+
+		// 親リンク
+		const parentLink = frontmatter.parent;
+		if (parentLink && typeof parentLink === 'string') {
+			memo.parentId = this.extractLinkTarget(parentLink);
+		}
+
+		// タグ
+		if (Array.isArray(frontmatter.tags)) {
+			memo.tags = frontmatter.tags
+				.filter((t): t is string => typeof t === 'string')
+				.map(t => t.trim());
+		}
+
+		// 昇格先タイプ
+		if (typeof frontmatter['promote-to'] === 'string') {
+			const promoteType = frontmatter['promote-to'].toLowerCase().trim();
+			const validPromoteTypes: DecisionItemType[] = ['option', 'risk', 'assumption', 'evidence'];
+			if (validPromoteTypes.includes(promoteType as DecisionItemType)) {
+				memo.promoteToType = promoteType as DecisionItemType;
+			}
+		}
+
+		return memo;
+	}
+
+	/**
 	 * フォルダ内のプロジェクト設定を探す
 	 */
 	findProjectConfig(folderPath: string): DecisionProjectConfig {
@@ -474,6 +521,14 @@ export class DecisionParser {
 						project.name = h1.heading;
 					}
 					break;
+
+				case 'memo': {
+					const memo = this.parseMemo(file);
+					if (memo) {
+						project.memos.set(file.path, memo);
+					}
+					break;
+				}
 
 				case 'option': {
 					const option = this.parseOption(file);

@@ -6,7 +6,7 @@
 import { ItemView, WorkspaceLeaf, TFile, Menu, Notice, ViewStateResult } from 'obsidian';
 import { DecisionParser } from './decisionParser';
 import { DecisionRenderer } from './decisionRenderer';
-import { DecisionProject, DecisionOption } from './decisionDataModel';
+import { DecisionProject, DecisionOption, DecisionItemType } from './decisionDataModel';
 import { rankOptions } from './scoring';
 import { sortRisksByExposure } from './riskModel';
 
@@ -25,7 +25,7 @@ interface DecisionViewState {
 /**
  * タブの種類
  */
-type TabType = 'overview' | 'options' | 'decisions' | 'risks';
+type TabType = 'overview' | 'memos' | 'options' | 'decisions' | 'risks' | 'assumptions' | 'evidences';
 
 export class DecisionView extends ItemView {
 	private parser: DecisionParser;
@@ -221,9 +221,12 @@ scores:
 		headerContent.createEl('h2', { cls: 'decision-title', text: this.currentProject.name });
 
 		const stats = headerContent.createDiv({ cls: 'decision-stats' });
+		stats.createEl('span', { cls: 'decision-stat', text: `${this.currentProject.memos.size} メモ` });
 		stats.createEl('span', { cls: 'decision-stat', text: `${this.currentProject.options.size} 選択肢` });
 		stats.createEl('span', { cls: 'decision-stat', text: `${this.currentProject.decisions.size} 意思決定` });
 		stats.createEl('span', { cls: 'decision-stat', text: `${this.currentProject.risks.size} リスク` });
+		stats.createEl('span', { cls: 'decision-stat', text: `${this.currentProject.assumptions.size} 仮説` });
+		stats.createEl('span', { cls: 'decision-stat', text: `${this.currentProject.evidences.size} エビデンス` });
 
 		// アクション
 		const actions = header.createDiv({ cls: 'decision-actions' });
@@ -233,9 +236,12 @@ scores:
 		const tabs = container.createDiv({ cls: 'decision-tabs' });
 		const tabItems: { key: TabType; label: string }[] = [
 			{ key: 'overview', label: '概要' },
+			{ key: 'memos', label: 'メモ' },
 			{ key: 'options', label: '選択肢' },
 			{ key: 'decisions', label: '意思決定' },
-			{ key: 'risks', label: 'リスク' }
+			{ key: 'risks', label: 'リスク' },
+			{ key: 'assumptions', label: '仮説' },
+			{ key: 'evidences', label: 'エビデンス' }
 		];
 
 		for (const tab of tabItems) {
@@ -271,6 +277,17 @@ scores:
 				);
 				break;
 
+			case 'memos': {
+				const memos = Array.from(this.currentProject.memos.values());
+				container.appendChild(
+					document.createRange().createContextualFragment(
+						this.renderer.renderMemosTable(memos)
+					)
+				);
+				this.setupMemoPromoteHandlers(container);
+				break;
+			}
+
 			case 'options': {
 				const options = Array.from(this.currentProject.options.values());
 				container.appendChild(
@@ -296,6 +313,26 @@ scores:
 				container.appendChild(
 					document.createRange().createContextualFragment(
 						this.renderer.renderRisksTable(risks)
+					)
+				);
+				break;
+			}
+
+			case 'assumptions': {
+				const assumptions = Array.from(this.currentProject.assumptions.values());
+				container.appendChild(
+					document.createRange().createContextualFragment(
+						this.renderer.renderAssumptionsTable(assumptions)
+					)
+				);
+				break;
+			}
+
+			case 'evidences': {
+				const evidences = Array.from(this.currentProject.evidences.values());
+				container.appendChild(
+					document.createRange().createContextualFragment(
+						this.renderer.renderEvidencesTable(evidences)
 					)
 				);
 				break;
@@ -399,5 +436,92 @@ scores:
 		});
 
 		menu.showAtMouseEvent(event);
+	}
+
+	/**
+	 * メモ昇格のイベントハンドラーを設定
+	 */
+	private setupMemoPromoteHandlers(container: HTMLElement): void {
+		container.querySelectorAll('.memo-promote-btn').forEach(btn => {
+			btn.addEventListener('click', async (e) => {
+				const filePath = (e.currentTarget as HTMLElement).dataset.filePath;
+				if (!filePath) return;
+
+				// 同じ行のセレクトを取得
+				const row = (e.currentTarget as HTMLElement).closest('tr');
+				const select = row?.querySelector('.memo-promote-select') as HTMLSelectElement | null;
+				const targetType = select?.value as DecisionItemType | '';
+
+				if (!targetType) {
+					new Notice('昇格先のタイプを選択してください');
+					return;
+				}
+
+				await this.promoteMemo(filePath, targetType);
+			});
+		});
+	}
+
+	/**
+	 * メモを指定タイプに昇格
+	 */
+	private async promoteMemo(filePath: string, targetType: DecisionItemType): Promise<void> {
+		const file = this.app.vault.getAbstractFileByPath(filePath);
+		if (!(file instanceof TFile)) {
+			new Notice('ファイルが見つかりません');
+			return;
+		}
+
+		try {
+			const content = await this.app.vault.read(file);
+			
+			// frontmatterを更新
+			const updatedContent = this.updateFrontmatterType(content, targetType);
+			
+			await this.app.vault.modify(file, updatedContent);
+			
+			const typeLabels: Record<string, string> = {
+				'option': '選択肢',
+				'risk': 'リスク',
+				'assumption': '仮説',
+				'evidence': '根拠'
+			};
+			new Notice(`「${file.basename}」を${typeLabels[targetType] || targetType}に昇格しました`);
+			
+			// ビューを更新
+			await this.refresh();
+		} catch (error) {
+			console.error('[Decision] Memo promotion failed:', error);
+			new Notice('昇格に失敗しました');
+		}
+	}
+
+	/**
+	 * frontmatterのnexuspm-typeを更新
+	 */
+	private updateFrontmatterType(content: string, newType: DecisionItemType): string {
+		// frontmatterの境界を見つける
+		const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
+		
+		if (!frontmatterMatch) {
+			// frontmatterがない場合は追加
+			return `---\nnexuspm-type: ${newType}\n---\n\n${content}`;
+		}
+
+		const frontmatter = frontmatterMatch[1];
+		const afterFrontmatter = content.slice(frontmatterMatch[0].length);
+
+		// nexuspm-typeを更新
+		let updatedFrontmatter: string;
+		if (frontmatter.match(/^nexuspm-type:/m)) {
+			updatedFrontmatter = frontmatter.replace(
+				/^nexuspm-type:.*$/m,
+				`nexuspm-type: ${newType}`
+			);
+		} else {
+			updatedFrontmatter = `nexuspm-type: ${newType}\n${frontmatter}`;
+		}
+
+		return `---\n${updatedFrontmatter}\n---${afterFrontmatter}`;
 	}
 }

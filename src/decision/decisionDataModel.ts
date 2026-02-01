@@ -10,6 +10,7 @@
  */
 export type DecisionItemType = 
 	| 'decision-project'
+	| 'memo'
 	| 'option'
 	| 'decision'
 	| 'risk'
@@ -205,6 +206,22 @@ export interface Evidence {
 }
 
 /**
+ * メモ（Memo）- 情報収集フェーズ用
+ */
+export interface Memo {
+	/** ファイルパス（一意識別子） */
+	id: string;
+	/** タイトル */
+	title: string;
+	/** 親ノートID */
+	parentId: string | null;
+	/** タグ（分類用） */
+	tags: string[];
+	/** 昇格先タイプ（後で変換する場合） */
+	promoteToType: DecisionItemType | null;
+}
+
+/**
  * Decision Project全体
  */
 export interface DecisionProject {
@@ -214,6 +231,8 @@ export interface DecisionProject {
 	name: string;
 	/** プロジェクト設定 */
 	config: DecisionProjectConfig;
+	/** メモ（情報収集フェーズ） */
+	memos: Map<string, Memo>;
 	/** 選択肢 */
 	options: Map<string, DecisionOption>;
 	/** 意思決定ログ */
@@ -304,6 +323,19 @@ export function createDefaultEvidence(id: string, title: string): Evidence {
 }
 
 /**
+ * デフォルトのMemoを作成
+ */
+export function createDefaultMemo(id: string, title: string): Memo {
+	return {
+		id,
+		title,
+		parentId: null,
+		tags: [],
+		promoteToType: null
+	};
+}
+
+/**
  * 空のDecisionProjectを作成
  */
 export function createEmptyProject(id: string, name: string): DecisionProject {
@@ -311,6 +343,7 @@ export function createEmptyProject(id: string, name: string): DecisionProject {
 		id,
 		name,
 		config: { ...DEFAULT_PROJECT_CONFIG },
+		memos: new Map(),
 		options: new Map(),
 		decisions: new Map(),
 		risks: new Map(),
