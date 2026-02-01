@@ -3,6 +3,10 @@
   "version": "1.0.0",
   "description": "NexusPM - Knowledge and Project Management Plugin for Obsidian",
   "main": "main.js",
+  "engines": {
+    "node": ">=22",
+    "npm": ">=10"
+  },
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "node --no-warnings esbuild.config.mjs production",
